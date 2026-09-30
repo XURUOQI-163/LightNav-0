@@ -381,6 +381,11 @@ wheels = [
 ]
 
 [[package]]
+name = "lightnav-trajectory"
+version = "0.1.0"
+source = { editable = "../trajectory_map" }
+
+[[package]]
 name = "mujoco"
 version = "3.11.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1021,6 +1026,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "casadi" },
+    { name = "lightnav-trajectory" },
     { name = "mujoco" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
@@ -1040,6 +1046,7 @@ microduck = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
     { name = "casadi", specifier = ">=3.7,<4" },
+    { name = "lightnav-trajectory", editable = "../trajectory_map" },
     { name = "mujoco", specifier = ">=3.3" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "onnxruntime", marker = "extra == 'microduck'", specifier = ">=1.24" },

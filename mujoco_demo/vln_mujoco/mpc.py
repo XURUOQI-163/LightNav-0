@@ -16,8 +16,9 @@ HORIZON = 5
 MPC_DT_S = 0.1
 WAYPOINT_DT_S = 0.1
 TRACK_V_MAX = 1.5
-OBJNAV_V_MAX = 0.8
-W_MAX = 3.0
+# Conservative limits for navigation with delayed visual predictions.
+OBJNAV_V_MAX = 0.25
+W_MAX = 0.8
 A_MAX_V = 2.0
 A_MAX_W = 5.0
 Q_WEIGHTS = (10.0, 10.0, 1.0)

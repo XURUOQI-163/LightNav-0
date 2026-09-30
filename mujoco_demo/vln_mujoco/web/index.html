@@ -6,7 +6,11 @@
   <meta name="theme-color" content="#0e1013">
   <title>VLN MuJoCo Console</title>
   <link rel="stylesheet" href="/static/styles.css?v=third-person-pip">
-  <script src="/static/app.js?v=third-person-pip" defer></script>
+  <!-- trajectory:start -->
+  <link rel="stylesheet" href="/trajectory-static/trajectory_map.css?v=1">
+  <script src="/trajectory-static/trajectory_map.js?v=1" defer></script>
+  <!-- trajectory:end -->
+  <script src="/static/app.js?v=trajectory-toggle-1" defer></script>
 </head>
 <body>
   <main class="shell">
@@ -37,6 +41,20 @@
       </div>
     </section>
 
+    <!-- trajectory:start -->
+    <section class="trajectory-panel panel" aria-label="实时轨迹图">
+      <div class="section-head">
+        <div><h2>实时轨迹图</h2><p id="trajectory-source" class="trajectory-source">等待定位来源</p></div>
+        <span id="trajectory-status" class="trajectory-status" role="status">等待位姿</span>
+      </div>
+      <canvas id="trajectory-map" class="trajectory-canvas" role="img" aria-label="起点、行驶路线与当前位置朝向"></canvas>
+      <div class="trajectory-footer">
+        <div class="trajectory-legend"><span>起点</span><span class="route">路线</span><span class="position">当前位置</span></div>
+        <span id="trajectory-metrics">—</span>
+      </div>
+    </section>
+
+    <!-- trajectory:end -->
     <aside class="controls panel">
       <div class="form-block">
         <label for="server-url">VLN Server WebSocket</label>

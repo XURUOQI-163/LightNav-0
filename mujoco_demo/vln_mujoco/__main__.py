@@ -16,6 +16,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=8088)
     parser.add_argument("--vln-server", default="")
     parser.add_argument(
+        "--trajectory-map",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable live trajectory recording and its web panel (default: disabled)",
+    )
+    parser.add_argument(
         "--robot",
         choices=("turtlebot", "microduck"),
         default="turtlebot",
@@ -47,6 +53,7 @@ def main() -> None:
         raise SystemExit("--port must be between 1 and 65535")
     server = VlnMujocoServer(
         default_vln_server=args.vln_server,
+        enable_trajectory_map=args.trajectory_map,
         simulation=simulation_from_args(args),
     )
     display_host = "127.0.0.1" if args.host in {"0.0.0.0", "::"} else args.host

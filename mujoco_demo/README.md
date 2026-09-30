@@ -235,3 +235,31 @@ endorsed by Open Robotics or ROBOTIS.
 - RGB only for now, at a camera resolution of `480 × 270`;
 - The MPC only tracks the local waypoints provided by VLN — no navigation map,
   global planning, collision response, or ROS interface.
+
+
+## Optional MuJoCo live trajectory map
+
+The map is disabled by default. Run from `mujoco_demo/`:
+
+```bash
+# Original viewer; no trajectory recording or map requests
+MUJOCO_GL=egl ./run.sh --vln-server ws://127.0.0.1:8050 --no-trajectory-map
+
+# Enable start point, observed route and live heading arrow
+MUJOCO_GL=egl ./run.sh --vln-server ws://127.0.0.1:8050 --trajectory-map
+```
+
+`--trajectory-map` enables recording and the map panel together;
+`--no-trajectory-map` explicitly disables both. Restart the existing MuJoCo
+process (Ctrl+C, then run again) to change the setting, then refresh the page.
+Do not launch another instance on the same port. The inference server does not
+need restarting. This switch does not change the model or MPC parameters.
+
+### Navigation speed limits
+
+`vln_mujoco/mpc.py` defines `OBJNAV_V_MAX = 0.4` (navigation linear speed,
+metres/second) and `W_MAX = 1.2` (angular speed cap, radians/second; also used
+by the simulation velocity clamp). Restart MuJoCo after editing these constants.
+These reduced limits moderate motion but do not eliminate delayed-path oscillation.
+The page's LATENCY measures the backend model request/response, not browser SSH
+transit or image waiting time before sending.

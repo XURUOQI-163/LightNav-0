@@ -1,6 +1,13 @@
 (() => {
   "use strict";
   const $ = (id) => document.getElementById(id);
+  const trajectory = $("trajectory-map") ? new LightNavTrajectory.TrajectoryView($("trajectory-map"), {
+    status: $("trajectory-status"), metrics: $("trajectory-metrics"), source: $("trajectory-source")
+  }) : null;
+  trajectory?.start();
+  window.addEventListener("pagehide", (event) => {
+    if (!event.persisted) trajectory?.destroy();
+  });
   const storedBoolean = (key) => {
     try { return localStorage.getItem(key) === "true"; } catch { return false; }
   };
@@ -48,6 +55,7 @@
         }
       }
       if (message.type === "command_result") {
+        if (message.ok && message.message === "simulation reset") trajectory?.invalidate();
         if (message.ok && typeof message.server_url === "string") {
           ui.serverUrl.value = message.server_url;
           state.serverUrlDirty = false;

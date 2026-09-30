@@ -1,0 +1,218 @@
+diff --git a/mujoco_demo/README.md b/mujoco_demo/README.md
+index 07d0196..9a3219a 100644
+--- a/mujoco_demo/README.md
++++ b/mujoco_demo/README.md
+@@ -47,6 +47,19 @@ address can also be set at startup:
+ ./run.sh --host 0.0.0.0 --port 8088
+ ```
+ 
++### Live trajectory map
++
++The panel below the camera shows the start, travelled route, and current heading
++from MuJoCo poses, independently of the VLN server. Manual and autonomous motion
++both update it. STOP preserves the route; RESET starts a new map. Reloading the
++page restores the server's history.
++
++The standalone [trajectory_map package](../trajectory_map/README.md) contains the
++recorder, browser component, tests, and future ROS EKF/Habitat input contract.
++`uv` installs it from the sibling `../trajectory_map` directory, so keep that
++directory when copying this demo. This first version uses simulator ground truth,
++not odometry/IMU fusion, and does not require lidar or special topology nodes.
++
+ ### MicroDuck (optional)
+ 
+ MicroDuck support deliberately keeps the robot MJCF, meshes, and walking policy
+diff --git a/mujoco_demo/pyproject.toml b/mujoco_demo/pyproject.toml
+index 6a20569..a481065 100644
+--- a/mujoco_demo/pyproject.toml
++++ b/mujoco_demo/pyproject.toml
+@@ -7,6 +7,7 @@ authors = [{ name = "Light Origins" }]
+ license = "Apache-2.0"
+ requires-python = ">=3.11"
+ dependencies = [
++    "lightnav-trajectory==0.1.0",
+     "aiohttp>=3.9",
+     "casadi>=3.7,<4",
+     "mujoco>=3.3",
+@@ -14,6 +15,9 @@ dependencies = [
+     "pillow>=10.0",
+ ]
+ 
++[tool.uv.sources]
++lightnav-trajectory = { path = "../trajectory_map", editable = true }
++
+ [project.optional-dependencies]
+ dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+ microduck = ["onnxruntime>=1.24"]
+diff --git a/mujoco_demo/uv.lock b/mujoco_demo/uv.lock
+index 8c0928d..80ceff6 100644
+--- a/mujoco_demo/uv.lock
++++ b/mujoco_demo/uv.lock
+@@ -380,6 +380,11 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl", hash = "sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12", size = 7484, upload-time = "2025-10-18T21:55:41.639Z" },
+ ]
+ 
++[[package]]
++name = "lightnav-trajectory"
++version = "0.1.0"
++source = { editable = "../trajectory_map" }
++
+ [[package]]
+ name = "mujoco"
+ version = "3.11.0"
+@@ -1021,6 +1026,7 @@ source = { editable = "." }
+ dependencies = [
+     { name = "aiohttp" },
+     { name = "casadi" },
++    { name = "lightnav-trajectory" },
+     { name = "mujoco" },
+     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+     { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+@@ -1040,6 +1046,7 @@ microduck = [
+ requires-dist = [
+     { name = "aiohttp", specifier = ">=3.9" },
+     { name = "casadi", specifier = ">=3.7,<4" },
++    { name = "lightnav-trajectory", editable = "../trajectory_map" },
+     { name = "mujoco", specifier = ">=3.3" },
+     { name = "numpy", specifier = ">=1.24" },
+     { name = "onnxruntime", marker = "extra == 'microduck'", specifier = ">=1.24" },
+diff --git a/mujoco_demo/vln_mujoco/server.py b/mujoco_demo/vln_mujoco/server.py
+index 668b6c4..2832099 100644
+--- a/mujoco_demo/vln_mujoco/server.py
++++ b/mujoco_demo/vln_mujoco/server.py
+@@ -5,10 +5,13 @@ import contextlib
+ import logging
+ import math
+ import time
++from importlib.resources import files
+ from pathlib import Path
+ from urllib.parse import urlparse
+ 
+ from aiohttp import WSMsgType, web
++from lightnav_trajectory import TrajectoryMap
++from lightnav_trajectory.adapters import pose_from_mujoco
+ 
+ from .model import SCENE_DATASET, SCENE_ID, SCENE_NAME
+ from .mpc import (
+@@ -60,12 +63,17 @@ class VlnMujocoServer:
+         self.mpc = MpcTracker()
+         self.capture_poses: dict[int, tuple[float, float, float]] = {}
+         self._last_runtime_signature: tuple[object, ...] | None = None
++        self.trajectory = TrajectoryMap()
++        self._trajectory_error = ""
++        self._sample_trajectory()
+ 
+     def app(self) -> web.Application:
+         app = web.Application()
+         app.router.add_get("/", self.index)
+         app.router.add_get("/ws", self.websocket)
+         app.router.add_get("/api/health", self.health)
++        app.router.add_get("/api/trajectory", self.trajectory_snapshot)
++        app.router.add_static("/trajectory-static", files("lightnav_trajectory") / "web")
+         app.router.add_get("/api/camera.jpg", self.camera)
+         app.router.add_get("/api/third-person.jpg", self.third_person_camera)
+         app.router.add_static("/static", WEB_DIR)
+@@ -96,6 +104,21 @@ class VlnMujocoServer:
+     async def health(self, _request: web.Request) -> web.Response:
+         return web.json_response({"ok": True, **self.snapshot(None)})
+ 
++    def _sample_trajectory(self) -> None:
++        # Independent of camera frames, controller ownership and VLN connectivity.
++        try:
++            self.trajectory.update(pose_from_mujoco(self.simulation.snapshot()))
++        except (ValueError, KeyError, TypeError) as exc:
++            self._trajectory_error = str(exc)
++        else:
++            self._trajectory_error = ""
++
++    async def trajectory_snapshot(self, _request: web.Request) -> web.Response:
++        data = self.trajectory.snapshot()
++        if self._trajectory_error:
++            data.update(status="invalid", error=self._trajectory_error)
++        return web.json_response(data, headers={"Cache-Control": "no-store"})
++
+     async def camera(self, _request: web.Request) -> web.Response:
+         frame = self.simulation.frame()
+         return self.camera_response(frame)
+@@ -221,6 +244,8 @@ class VlnMujocoServer:
+             self.manual_owner = None
+             self.stop_vln()
+             self.simulation.reset()
++            self.trajectory.reset()
++            self._sample_trajectory()
+             await self.result(socket, True, "simulation reset")
+             return
+         await self.result(socket, False, "unknown command")
+@@ -347,7 +372,12 @@ class VlnMujocoServer:
+     async def update_loop(self) -> None:
+         control_period_s = 1.0 / CONTROL_RATE_HZ
+         next_control_s = time.monotonic()
++        next_trajectory_s = next_control_s
+         while True:
++            sample_now = time.monotonic()
++            if sample_now >= next_trajectory_s:
++                self._sample_trajectory()
++                next_trajectory_s = sample_now + 0.1
+             frame = self.simulation.frame()
+             if frame is not None and frame.stamp_ns != self.last_frame_stamp:
+                 if self.vln.offer_frame(frame.stamp_ns, frame.jpeg):
+diff --git a/mujoco_demo/vln_mujoco/web/app.js b/mujoco_demo/vln_mujoco/web/app.js
+index 6b76b68..eed7338 100644
+--- a/mujoco_demo/vln_mujoco/web/app.js
++++ b/mujoco_demo/vln_mujoco/web/app.js
+@@ -1,6 +1,13 @@
+ (() => {
+   "use strict";
+   const $ = (id) => document.getElementById(id);
++  const trajectory = new LightNavTrajectory.TrajectoryView($("trajectory-map"), {
++    status: $("trajectory-status"), metrics: $("trajectory-metrics"), source: $("trajectory-source")
++  });
++  trajectory.start();
++  window.addEventListener("pagehide", (event) => {
++    if (!event.persisted) trajectory.destroy();
++  });
+   const storedBoolean = (key) => {
+     try { return localStorage.getItem(key) === "true"; } catch { return false; }
+   };
+@@ -48,6 +55,7 @@
+         }
+       }
+       if (message.type === "command_result") {
++        if (message.ok && message.message === "simulation reset") trajectory.invalidate();
+         if (message.ok && typeof message.server_url === "string") {
+           ui.serverUrl.value = message.server_url;
+           state.serverUrlDirty = false;
+diff --git a/mujoco_demo/vln_mujoco/web/index.html b/mujoco_demo/vln_mujoco/web/index.html
+index 823f3b5..1e42552 100644
+--- a/mujoco_demo/vln_mujoco/web/index.html
++++ b/mujoco_demo/vln_mujoco/web/index.html
+@@ -6,7 +6,9 @@
+   <meta name="theme-color" content="#0e1013">
+   <title>VLN MuJoCo Console</title>
+   <link rel="stylesheet" href="/static/styles.css?v=third-person-pip">
+-  <script src="/static/app.js?v=third-person-pip" defer></script>
++  <link rel="stylesheet" href="/trajectory-static/trajectory_map.css?v=1">
++  <script src="/trajectory-static/trajectory_map.js?v=1" defer></script>
++  <script src="/static/app.js?v=trajectory-map-1" defer></script>
+ </head>
+ <body>
+   <main class="shell">
+@@ -37,6 +39,18 @@
+       </div>
+     </section>
+ 
++    <section class="trajectory-panel panel" aria-label="实时轨迹图">
++      <div class="section-head">
++        <div><h2>实时轨迹图</h2><p id="trajectory-source" class="trajectory-source">等待定位来源</p></div>
++        <span id="trajectory-status" class="trajectory-status" role="status">等待位姿</span>
++      </div>
++      <canvas id="trajectory-map" class="trajectory-canvas" role="img" aria-label="起点、行驶路线与当前位置朝向"></canvas>
++      <div class="trajectory-footer">
++        <div class="trajectory-legend"><span>起点</span><span class="route">路线</span><span class="position">当前位置</span></div>
++        <span id="trajectory-metrics">—</span>
++      </div>
++    </section>
++
+     <aside class="controls panel">
+       <div class="form-block">
+         <label for="server-url">VLN Server WebSocket</label>

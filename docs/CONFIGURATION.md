@@ -179,3 +179,22 @@ Frames within one session must share one size (the first frame decides; `reset` 
 over). `keep` avoids geometric distortion but changes the token grid the model sees, which
 the released checkpoint was not trained on — validate on your robot before relying on it.
 Full native resolution (feeding the camera's own pixel count) is not supported.
+
+
+## Optional MuJoCo live trajectory map
+
+The map is disabled by default. Run from `mujoco_demo/`:
+
+```bash
+# Original viewer; no trajectory recording or map requests
+MUJOCO_GL=egl ./run.sh --vln-server ws://127.0.0.1:8050 --no-trajectory-map
+
+# Enable start point, observed route and live heading arrow
+MUJOCO_GL=egl ./run.sh --vln-server ws://127.0.0.1:8050 --trajectory-map
+```
+
+`--trajectory-map` enables recording and the map panel together;
+`--no-trajectory-map` explicitly disables both. Restart the existing MuJoCo
+process (Ctrl+C, then run again) to change the setting, then refresh the page.
+Do not launch another instance on the same port. The inference server does not
+need restarting. This switch does not change the model or MPC parameters.

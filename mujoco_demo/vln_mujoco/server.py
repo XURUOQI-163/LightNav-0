@@ -4,11 +4,15 @@ import asyncio
 import contextlib
 import logging
 import math
+import re
 import time
+from importlib.resources import files
 from pathlib import Path
 from urllib.parse import urlparse
 
 from aiohttp import WSMsgType, web
+from lightnav_trajectory import TrajectoryMap
+from lightnav_trajectory.adapters import pose_from_mujoco
 
 from .model import SCENE_DATASET, SCENE_ID, SCENE_NAME
 from .mpc import (
@@ -46,7 +50,10 @@ def empty_vln_result() -> dict[str, object]:
 
 
 class VlnMujocoServer:
-    def __init__(self, *, default_vln_server: str = "", simulation: Simulation | None = None) -> None:
+    def __init__(
+        self, *, default_vln_server: str = "", simulation: Simulation | None = None,
+        enable_trajectory_map: bool = False,
+    ) -> None:
         self.simulation = simulation or Simulation()
         self.vln = VlnClient(logging.getLogger("vln_mujoco.vln"), default_vln_server)
         self.sockets: set[web.WebSocketResponse] = set()
@@ -60,12 +67,18 @@ class VlnMujocoServer:
         self.mpc = MpcTracker()
         self.capture_poses: dict[int, tuple[float, float, float]] = {}
         self._last_runtime_signature: tuple[object, ...] | None = None
+        self.trajectory = TrajectoryMap() if enable_trajectory_map else None
+        self._trajectory_error = ""
+        self._sample_trajectory()
 
     def app(self) -> web.Application:
         app = web.Application()
         app.router.add_get("/", self.index)
         app.router.add_get("/ws", self.websocket)
         app.router.add_get("/api/health", self.health)
+        if self.trajectory is not None:
+            app.router.add_get("/api/trajectory", self.trajectory_snapshot)
+            app.router.add_static("/trajectory-static", files("lightnav_trajectory") / "web")
         app.router.add_get("/api/camera.jpg", self.camera)
         app.router.add_get("/api/third-person.jpg", self.third_person_camera)
         app.router.add_static("/static", WEB_DIR)
@@ -90,11 +103,38 @@ class VlnMujocoServer:
         for socket in tuple(self.sockets):
             await socket.close(code=1001, message=b"server shutdown")
 
-    async def index(self, _request: web.Request) -> web.FileResponse:
-        return web.FileResponse(WEB_DIR / "index.html")
+    async def index(self, _request: web.Request) -> web.Response:
+        html = (WEB_DIR / "index.html").read_text()
+        if self.trajectory is None:
+            html = re.sub(
+                r"<!-- trajectory:start -->.*?<!-- trajectory:end -->",
+                "", html, flags=re.DOTALL,
+            )
+        return web.Response(
+            text=html, content_type="text/html", headers={"Cache-Control": "no-store"},
+        )
 
     async def health(self, _request: web.Request) -> web.Response:
         return web.json_response({"ok": True, **self.snapshot(None)})
+
+    def _sample_trajectory(self) -> None:
+        # Disabled mode does not read the simulation or record any poses.
+        if self.trajectory is None:
+            return
+        try:
+            self.trajectory.update(pose_from_mujoco(self.simulation.snapshot()))
+        except (ValueError, KeyError, TypeError) as exc:
+            self._trajectory_error = str(exc)
+        else:
+            self._trajectory_error = ""
+
+    async def trajectory_snapshot(self, _request: web.Request) -> web.Response:
+        if self.trajectory is None:
+            raise web.HTTPNotFound()
+        data = self.trajectory.snapshot()
+        if self._trajectory_error:
+            data.update(status="invalid", error=self._trajectory_error)
+        return web.json_response(data, headers={"Cache-Control": "no-store"})
 
     async def camera(self, _request: web.Request) -> web.Response:
         frame = self.simulation.frame()
@@ -221,6 +261,9 @@ class VlnMujocoServer:
             self.manual_owner = None
             self.stop_vln()
             self.simulation.reset()
+            if self.trajectory is not None:
+                self.trajectory.reset()
+                self._sample_trajectory()
             await self.result(socket, True, "simulation reset")
             return
         await self.result(socket, False, "unknown command")
@@ -347,7 +390,12 @@ class VlnMujocoServer:
     async def update_loop(self) -> None:
         control_period_s = 1.0 / CONTROL_RATE_HZ
         next_control_s = time.monotonic()
+        next_trajectory_s = next_control_s
         while True:
+            sample_now = time.monotonic()
+            if self.trajectory is not None and sample_now >= next_trajectory_s:
+                self._sample_trajectory()
+                next_trajectory_s = sample_now + 0.1
             frame = self.simulation.frame()
             if frame is not None and frame.stamp_ns != self.last_frame_stamp:
                 if self.vln.offer_frame(frame.stamp_ns, frame.jpeg):

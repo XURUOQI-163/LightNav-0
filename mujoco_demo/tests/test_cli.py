@@ -19,3 +19,9 @@ def test_turtlebot_rejects_microduck_only_paths() -> None:
     args = parse_args(["--robot-model", "robot.xml"])
     with pytest.raises(SystemExit, match="require --robot microduck"):
         simulation_from_args(args)
+
+
+def test_trajectory_map_is_opt_in():
+    assert parse_args([]).trajectory_map is False
+    assert parse_args(["--trajectory-map"]).trajectory_map is True
+    assert parse_args(["--no-trajectory-map"]).trajectory_map is False
