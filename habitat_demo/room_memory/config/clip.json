@@ -1,0 +1,14 @@
+{
+  "semantic": {
+    "backend": "clip",
+    "model_path": "/home/xrq/.cache/clip/ViT-B-32.pt",
+    "python_executable": "/home/xrq/.conda/envs/omnivla/bin/python",
+    "device": "cpu",
+    "num_threads": 2,
+    "timeout": 60.0,
+    "live_enabled": true,
+    "live_interval": 1.0,
+    "labels": ["bedroom", "living room", "bathroom", "kitchen", "dining room", "office room", "gym", "lounge", "laundry room", "corridor"],
+    "templates": ["a photo of a {}.", "a photo of the interior of a {}.", "an indoor scene of a {}."]
+  }
+}

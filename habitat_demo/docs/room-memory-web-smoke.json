@@ -1,0 +1,9 @@
+{
+  "mode": "real Habitat RGB-D + fixed fake local policy, no cloud API",
+  "steps": 30,
+  "trajectory_points": 20,
+  "room_nodes": 1,
+  "reset_session_changed": true,
+  "page_errors": [],
+  "dropped_frames": 0
+}

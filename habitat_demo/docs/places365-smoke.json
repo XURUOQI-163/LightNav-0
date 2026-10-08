@@ -1,0 +1,108 @@
+{
+  "date": "2026-10-02",
+  "navigation": "fixed test client, no VLN weights",
+  "habitat_python": "3.9.23",
+  "semantic_config": {
+    "backend": "places365",
+    "repo_path": "/home/xrq/projects/places365",
+    "python_executable": "/home/xrq/.conda/envs/places365/bin/python",
+    "mode": "subprocess",
+    "device": "cpu",
+    "num_threads": 2,
+    "timeout": 60.0,
+    "mapping_path": null
+  },
+  "api_key_required": false,
+  "warm_one_frame_ms": 37.81,
+  "steps": 30,
+  "trajectory_points": 14,
+  "dropped_frames": 17,
+  "rooms": [
+    {
+      "room_id": "R0",
+      "room_type": "unknown",
+      "room_type_probabilities": {
+        "bedroom": 0.01388210594389065,
+        "living_room": 0.0007976249185456523,
+        "kitchen": 0.0005453157858872954,
+        "dining_room": 0.00020880187069054448,
+        "office": 0.0005053173320445098,
+        "bathroom": 0.0015052061186272407,
+        "corridor": 0.2554334132799802,
+        "staircase": 0.23038548043243728,
+        "storage": 0.09060208098048073,
+        "other": 0.0,
+        "unknown": 0.4061346533374159
+      },
+      "semantic_confidence": 0.40613465555495526,
+      "observation_state": "partial",
+      "first_seen_time": 0.0,
+      "last_seen_time": 10.0,
+      "entry_pose": {
+        "x": -3.061373472213745,
+        "y": -2.6264312267303467,
+        "yaw": 0.0
+      },
+      "exit_pose": null,
+      "trajectory_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13
+      ],
+      "entry_portal_ids": [],
+      "connected_room_ids": [],
+      "representative_frame_ids": [
+        "F0",
+        "F1",
+        "F2",
+        "F3",
+        "F4"
+      ],
+      "representative_frame_id": "F0",
+      "visited": true,
+      "search_count": 0,
+      "visit_count": 1,
+      "semantic_status": "ready",
+      "topological_status": "provisional"
+    }
+  ],
+  "worker_reused": true,
+  "torch_imported_in_habitat": false,
+  "single_frame_result": {
+    "room_type": "unknown",
+    "probabilities": {
+      "bedroom": 0.023699723233915795,
+      "living_room": 0.01734147012675048,
+      "kitchen": 0.0021599731135153464,
+      "dining_room": 0.0015283007621918348,
+      "office": 0.006917916965809397,
+      "bathroom": 0.01863697613325269,
+      "corridor": 0.003233389655253405,
+      "staircase": 0.005946048460280048,
+      "storage": 0.013562717769297456,
+      "other": 0.0,
+      "unknown": 0.9069734837797335
+    },
+    "confidence": 0.9069734952390718,
+    "representative_frame_id": "F9999"
+  },
+  "browser": {
+    "page_errors": [],
+    "places365_visible": true,
+    "representative_image_loaded": true,
+    "navigation_controls_enabled": true
+  },
+  "reset_created_new_session": true,
+  "worker_reaped_on_shutdown": true
+}

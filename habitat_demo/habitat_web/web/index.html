@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0e1013">
+  <title>Habitat Navigation</title>
+  <link rel="stylesheet" href="/static/styles.css?v=places-top1-1">
+  <script src="/static/pointing.js?v=1" defer></script>
+  <script src="/static/app.js?v=stop-reasons-1" defer></script>
+  <script src="/static/room_map.js?v=semantic-backends-2" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero panel" aria-label="Habitat 实时画面">
+      <div class="section-head">
+        <h1>Habitat Viewer</h1>
+        <span class="camera-label">第一人称 RGB</span>
+      </div>
+      <div class="camera">
+        <img id="camera-image" alt="Habitat 第一人称 RGB 画面" hidden>
+        <svg id="pointing-overlay" aria-label="LightNav APOS OPOS 预测点" hidden></svg>
+        <p id="camera-message" class="camera-message" role="status">等待场景画面…</p>
+      </div>
+      <div id="pointing-info" class="pointing-info" hidden></div>
+      <div id="room-live" class="room-live" aria-label="当前画面场景识别" hidden>
+        <div class="room-live-head"><strong id="room-live-title">当前画面 · 场景识别</strong><span id="room-live-status">等待图像</span></div>
+        <p id="room-live-result" class="room-live-result">等待识别</p>
+        <p id="room-live-meta" class="hint">—</p>
+        <p id="room-live-error" class="error-message" role="status" hidden></p>
+      </div>
+      <div class="metrics">
+        <span>仿真时间<strong id="sim-time">—</strong></span>
+        <span>执行步数<strong id="step-count">—</strong></span>
+        <span>模型推理<strong id="latency">—</strong></span>
+      </div>
+    </section>
+    <aside class="controls panel">
+      <div class="section-head"><h2>语言导航</h2><span id="connection" class="connection">连接中</span></div>
+      <form id="navigation-form" class="form-block">
+        <label for="backend">导航模型</label>
+        <select id="backend" name="backend">
+          <option value="lightnav">LightNav</option>
+          <option value="omnivla">OmniVLA</option>
+        </select>
+        <label for="instruction">导航指令</label>
+        <textarea id="instruction" name="instruction" rows="5" maxlength="1024" placeholder="例如：向前走，经过桌子后向右转。" required></textarea>
+        <button class="primary" id="start-button" type="submit" disabled>开始导航</button>
+        <p class="hint">输入指令后开始；停止后可更换模型或指令。</p>
+      </form>
+      <div class="safety-row">
+        <button class="stop" id="stop-button" type="button">停止</button>
+        <button class="reset" id="reset-button" type="button" disabled>重置场景</button>
+      </div>
+      <div class="status-block" role="status" aria-live="polite">
+        <strong id="run-status">连接中</strong>
+        <p id="run-detail">正在连接 Habitat 服务…</p>
+      </div>
+      <p id="error-message" class="error-message" role="alert" hidden></p>
+    </aside>
+    <section id="room-memory-panel" class="room-memory panel" aria-label="二维房间记忆" hidden>
+      <div class="section-head room-memory-head">
+        <div><h2>房间记忆</h2><p id="room-memory-status" class="hint">等待观测…</p></div>
+        <a id="room-memory-export" class="room-export" href="/api/room-memory/export" download>导出 JSON</a>
+      </div>
+      <p id="room-map-note" class="room-map-note">这是不完整观测图。彩色范围表示已观测的房间空间，不代表内部处处可通行；虚线边界尚未闭合，实线表示墙体证据。空白可能尚未观测。节点是入口或候选空间的显示锚点；红色仅表示已穿越，不代表完整搜索；类型后的 ? 表示暂定分类。</p>
+      <div class="room-map-legend" aria-label="地图图例">
+        <label><input id="room-regions-toggle" type="checkbox" checked> 显示房间范围</label>
+        <span><i class="legend-trajectory"></i>行走轨迹</span>
+        <span><i class="legend-room"></i>已进入空间 / 已穿越门口</span>
+        <span><i class="legend-prospective"></i>候选空间 / 未进入门口</span>
+        <span><i class="legend-portal"></i>候选连接</span>
+        <span><i class="legend-start"></i>起点</span>
+        <span><i class="legend-pose"></i>当前位置 / 朝向</span>
+      </div>
+      <p id="room-memory-error" class="error-message" role="status" hidden></p>
+      <div class="room-memory-body">
+        <div class="room-map-container">
+          <svg id="room-map" aria-label="房间范围、轨迹、房间节点与门口连接图" role="group"></svg>
+          <p id="room-map-empty" class="room-map-empty">等待第一条位姿观测…</p>
+          <span class="room-map-axis" aria-hidden="true">↑ +Y &nbsp; → +X</span>
+        </div>
+        <aside id="room-detail" class="room-detail" aria-label="所选房间详情">
+          <h3 id="room-detail-title">房间详情</h3>
+          <p class="hint">R0、R1 是空间节点编号；候选空间进入后沿用原编号。</p>
+          <p id="room-detail-empty" class="hint">点击空间节点或门口查看观测记录。</p>
+          <div id="room-detail-content" hidden>
+            <dl class="room-detail-fields">
+              <dt>多视图 Top-1</dt><dd id="room-detail-type">等待识别</dd>
+              <dt>语义状态</dt><dd id="room-detail-semantic">—</dd>
+              <dt>类别分数</dt><dd id="room-detail-confidence">—</dd>
+              <dt>拓扑状态</dt><dd id="room-detail-topology">—</dd>
+              <dt>观测状态</dt><dd id="room-detail-observation">—</dd>
+              <dt>区域边界</dt><dd id="room-detail-boundary">—</dd>
+              <dt>已记录范围</dt><dd id="room-detail-area">—</dd>
+              <dt>边界证据比例</dt><dd id="room-detail-geometry">—</dd>
+              <dt>进入记录</dt><dd id="room-detail-visits">—</dd>
+              <dt>首次 / 最近观测</dt><dd id="room-detail-time">—</dd>
+              <dt>入口位置</dt><dd id="room-detail-entry">—</dd>
+              <dt>候选显示锚点</dt><dd id="room-detail-anchor">—</dd>
+              <dt>连接房间</dt><dd id="room-detail-connected">—</dd>
+            </dl>
+            <div id="room-detail-portal" class="room-detail-portal" hidden>
+              <h4>门口 <span id="room-detail-portal-id"></span></h4>
+              <dl class="room-detail-fields">
+                <dt>门口状态</dt><dd id="room-detail-portal-status">—</dd>
+                <dt>检测置信度</dt><dd id="room-detail-portal-confidence">—</dd>
+                <dt>估计宽度</dt><dd id="room-detail-portal-width">—</dd>
+              </dl>
+            </div>
+            <figure class="room-representative-frame">
+              <img id="room-representative" alt="所选房间的代表观测画面" hidden>
+              <figcaption id="room-representative-note">暂无代表画面</figcaption>
+            </figure>
+          </div>
+        </aside>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

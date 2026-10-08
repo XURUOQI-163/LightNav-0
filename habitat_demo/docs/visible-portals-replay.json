@@ -1,0 +1,128 @@
+{
+  "blue": {
+    "summary": {
+      "frames": 134,
+      "rooms": 1,
+      "prospective_rooms": 1,
+      "portals": 1,
+      "explored_portals": 0,
+      "reasons": {
+        "opening_width_out_of_bounds": 7,
+        "opening_not_observed_free": 4,
+        "accepted_visual_opening": 29,
+        "invalid_or_outside_rgb_box": 3
+      },
+      "median_detection_ms": 90.33203381113708
+    },
+    "portals": [
+      {
+        "portal_id": "P0",
+        "x": 3.555364946475922,
+        "y": -1.4060548734881928,
+        "normal_yaw": 0.1770193460340778,
+        "width": 1.0430004940413813,
+        "room_a": "R0",
+        "room_b": "R1",
+        "confidence": 0.5008953221486333,
+        "traversal_count": 0,
+        "status": "unexplored",
+        "first_seen_time": 11.000000000000002,
+        "last_seen_time": 31.999999999999954,
+        "observation_count": 29,
+        "source": "yoloe",
+        "geometry_supported": false
+      }
+    ],
+    "rooms": [
+      {
+        "room_id": "R0",
+        "room_type": "unknown",
+        "semantic_confidence": 0.5278376340866089,
+        "visit_count": 1,
+        "visited": true
+      }
+    ],
+    "prospective_rooms": [
+      {
+        "room_id": "R1",
+        "room_type": "unknown",
+        "semantic_confidence": 0.0,
+        "visit_count": 0,
+        "visited": false
+      }
+    ],
+    "first_portal_frame": 30,
+    "first_entered_frame": null,
+    "current_room": "R0"
+  },
+  "return": {
+    "summary": {
+      "frames": 171,
+      "rooms": 2,
+      "prospective_rooms": 0,
+      "portals": 1,
+      "explored_portals": 1,
+      "reasons": {
+        "opening_width_out_of_bounds": 6,
+        "opening_not_observed_free": 24,
+        "accepted_visual_opening": 39,
+        "threshold_outside_view": 4
+      },
+      "median_detection_ms": 97.03239647205919
+    },
+    "portals": [
+      {
+        "portal_id": "P0",
+        "x": 3.675772780824917,
+        "y": -1.3385368633785977,
+        "normal_yaw": 0.03589176937619024,
+        "width": 1.1281662997226125,
+        "room_a": "R0",
+        "room_b": "R1",
+        "confidence": 0.5723182364277024,
+        "traversal_count": 2,
+        "status": "explored",
+        "first_seen_time": 11.000000000000002,
+        "last_seen_time": 32.66666666666662,
+        "observation_count": 38,
+        "source": "yoloe",
+        "geometry_supported": false
+      }
+    ],
+    "rooms": [
+      {
+        "room_id": "R0",
+        "room_type": "unknown",
+        "semantic_confidence": 0.0,
+        "visit_count": 2,
+        "visited": true
+      },
+      {
+        "room_id": "R1",
+        "room_type": "unknown",
+        "semantic_confidence": 0.0,
+        "visit_count": 1,
+        "visited": true
+      }
+    ],
+    "prospective_rooms": [],
+    "first_portal_frame": 30,
+    "first_entered_frame": 99,
+    "current_room": "R0"
+  },
+  "model_sha256": "48f24206bc8680d60cbbfa296b0140da849669b9515058b72f5a945142df0654",
+  "source_session": "bfe951ecd52c499dbf94b5bd5ab0f020",
+  "date": "2026-10-06",
+  "live_startup": {
+    "schema_version": 2,
+    "current_room_id": "R0",
+    "doorway_status": "ready",
+    "doorway_error": null,
+    "doorway_diagnostics": {
+      "timestamp": 0.0,
+      "rgb_detections": 0,
+      "accepted": 0,
+      "checks": []
+    }
+  }
+}

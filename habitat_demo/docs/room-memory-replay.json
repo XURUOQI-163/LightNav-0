@@ -1,0 +1,11 @@
+{
+  "observations": 1212,
+  "rooms": 2,
+  "portals": 1,
+  "candidate_frames": 34,
+  "mean_memory_ms": 10.715772370633395,
+  "p95_memory_ms": 15.652098337886855,
+  "route_geodesic": 25.384733200073242,
+  "semantic_api": "not_called",
+  "evaluation": "unlabelled_GT_path_replay"
+}

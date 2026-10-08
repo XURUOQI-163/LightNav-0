@@ -1,0 +1,13 @@
+# Visible portals: incremental room_memory design
+
+User scope: detect RGB doorway proposals with YOLOE-26s, use synchronized depth only for position/width/open-space checks; immediately remember trusted visible unentered portals and prospective rooms. Entering promotes the same room ID and marks its portal explored. No navigation/control changes or exploration scheduler.
+
+- Keep existing trajectory, PoseSource, graph persistence, representative-image endpoints, Places365 worker and session reset.
+- Add YOLOE worker and bounded independent queue. A result always carries its original RGB-D timestamp and pose, never the latest camera pose. Keep recent observation poses to recognize a crossing that happened while inference was pending; reject gaps/teleports and old sessions.
+- RGB proposal + observed metric clearance creates one `PortalEdge(status=unexplored,traversal_count=0)` and `ProspectiveRoom(visited=false,visit_count=0)`. World position, orientation modulo pi, width and source-side compatibility deduplicate repeat views. Existing depth detector provides support and diagnostics; its paired-jamb requirement does not gate visual proposals.
+- `RoomGraphManager.rooms` internally owns both node states; exported `rooms` are entered nodes and `prospective_rooms` are unentered nodes. IDs remain stable through promotion. Candidate anchor is a schematic point beyond the doorway, never a claimed room center.
+- Portal observations update measured location/confidence. Crossing uses actual continuous pose segment crossing within opening width, with signed-distance hysteresis. Standing at a doorway, looking through it, rotation alone, stale inference or teleport cannot mark explored. Existing known-portal revisit endpoints remain reusable.
+- Crop doorway interior for tentative Places365 semantics. Do not insert ROI views into the current room or formal multi-view batch. On promotion clear the tentative batch, retain provenance in tentative fields, collect normal views. Semantic request generations prevent pre-entry results overwriting post-entry classification.
+- Blue portal: seen/unentered. Red portal: entered through; does not imply exhaustive search. `search_count` remains reserved.
+- Missing weights/detection failures are visible, not silently treated as no doors. Navigation stays independent; no monkey patches to model/control.
+- Validate synthetic closed/open/one-sided/oblique depth, duplicate and neighboring portals, delayed crossing, return, stale semantic result/reset, bounds, and browser blue→red transition. Replay saved Habitat route with real RGB/YOLOE/depth without feeding detections or actions into the navigation model. A successful replay is not a detection accuracy benchmark.

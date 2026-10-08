@@ -1,0 +1,25 @@
+{
+  "session_id": "bfe951ecd52c499dbf94b5bd5ab0f020",
+  "task": "Find a toilet.",
+  "saved_state": {
+    "step": 200,
+    "max_steps": 200,
+    "sim_time": 66.6666666666668,
+    "error": "",
+    "rooms": 1,
+    "portals": 0,
+    "trajectory_points": 134,
+    "semantic_top_type": "corridor",
+    "semantic_score": 0.5278376407751519,
+    "accept_threshold": 0.55
+  },
+  "replay": "rerender saved 2D trajectory samples in the same HM3D scene at starting floor height, not original depth capture",
+  "replayed_samples": 134,
+  "geometry_reasons": {
+    "no_bilateral_jambs": 130,
+    "opening_not_observed_free": 4
+  },
+  "candidate_frames": 0,
+  "geometry_changed": false,
+  "conclusion": "Frontal same-frame bilateral jamb requirement misses the right-turn side doorway; room splitting not repaired by the step-limit/UI change."
+}

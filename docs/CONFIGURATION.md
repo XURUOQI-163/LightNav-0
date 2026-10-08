@@ -179,3 +179,52 @@ Frames within one session must share one size (the first frame decides; `reset` 
 over). `keep` avoids geometric distortion but changes the token grid the model sees, which
 the released checkpoint was not trained on — validate on your robot before relying on it.
 Full native resolution (feeding the camera's own pixel count) is not supported.
+
+## Simple Habitat web viewer
+
+The independent `habitat_demo/` provides a headless Habitat RGB viewer and language
+controls for LightNav or the minimal full OmniVLA service. Its commands, defaults,
+model URLs and camera/control parameters are documented in
+[habitat_demo/CONFIGURATION.md](../habitat_demo/CONFIGURATION.md), with complete
+launch examples in [habitat_demo/README.md](../habitat_demo/README.md).
+It does not modify the existing MuJoCo or model inference entry points.
+For HM3D, pass `--scene-dataset-config` with the matching
+`.scene_dataset_config.json` alongside `--scene`; see the launch examples above.
+Optional passive room memory is enabled by `--room-memory`, with thresholds and
+local Places365 inference options in `--room-memory-config` and per-session artifacts under
+`--room-memory-output` (default `runs/room-memory`). It does not issue policy actions.
+By default, Habitat automatically launches a persistent CPU inference worker using
+the existing `places365` Python environment; no API key or separate service launch
+is required. Qwen remains an explicitly selected optional backend.
+Places365 now retains the raw 365-class Top-1 without a confidence cutoff. The
+camera panel shows a separate live single-frame result (default at most once per
+second), while room nodes retain multiview averaging. `semantic.live_enabled`
+and `semantic.live_interval` control this observer; `live_semantic` in the memory
+API reports timestamps, processing time, counts and errors. Legacy
+`memory.semantic_min_confidence` is accepted but no longer filters labels.
+Use `--room-semantic-backend clip` to select the additional local CLIP ViT-B/32
+observer, or `--room-semantic-backend places365` to retain the original scene
+classifier. CLIP uses the ten configured room names and the existing `omnivla`
+Python environment; only the selected backend runs. Neither option changes the
+navigation policy. See [Habitat configuration](../habitat_demo/CONFIGURATION.md)
+for `room_memory/config/clip.json`, backend override behavior, and the
+`python -m room_memory.compare_semantics` command for comparing identical JPEGs.
+
+Room memory now enables a separate local YOLOE-26s worker by default. RGB doorway
+proposals require synchronized depth clearance before creating blue unexplored
+portals and prospective rooms; actual crossings promote them under the same IDs.
+`doorway` options (worker environment, local weights/prompt cache, confidence,
+queue limits and depth thresholds) are documented in
+[habitat_demo/CONFIGURATION.md](../habitat_demo/CONFIGURATION.md).
+Set `doorway.enabled=false` for the previous depth-only mode, or omit
+`--room-memory` to disable all memory processing. No navigation model flags change.
+
+`regions.enabled=true` adds bounded RGB-D structural evidence and partial room
+polygons using Habitat GT pose. Set it to `false` to retain the original graph
+without region computation. The browser checkbox only toggles region rendering.
+JSON v3 adds region fields and structural diagnostics; each enabled session saves
+`structure.npz` alongside the graph. See the Habitat configuration reference for
+resolution, update interval, depth limits and single-floor height protection.
+
+The Habitat viewer defaults to `--max-steps 0` (unlimited). A positive integer enables
+an explicit action limit; `/api/state.stop_reason` and the page report why navigation stopped.

@@ -134,6 +134,10 @@ a page that renders proves nothing about the server. Check the telemetry, not th
 
 ## Conventions
 
+- User-maintained command reference: `/home/xrq/projects/命令行总结.md`.
+  Review it after each project change and update affected launch commands,
+  environments, configuration, ports, and restart instructions in the same pass.
+  Keep it operational only; algorithm explanations belong in project docs or chat.
 - Match the surrounding code; `make check` (ruff) is authoritative on style.
 - New CPU-testable behaviour gets a test under `tests/`. Mark anything needing CUDA or
   weights with `gpu` so `make test` keeps skipping it.

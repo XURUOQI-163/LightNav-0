@@ -1,0 +1,38 @@
+{
+  "frames": 184,
+  "rooms": 2,
+  "prospective_rooms": 2,
+  "portals": 3,
+  "explored_portals": 1,
+  "reasons": {
+    "opening_not_observed_free": 64,
+    "opening_width_out_of_bounds": 17,
+    "threshold_outside_view": 8,
+    "accepted_visual_opening": 22
+  },
+  "median_detection_ms": 89.54850398004055,
+  "structure": {
+    "enabled": true,
+    "status": "ready",
+    "revision": 62,
+    "cell_size": 0.05,
+    "grid_size": 1024,
+    "observed_area_m2": 97.388,
+    "wall_cells": 1622,
+    "floor_height": 0.10685312747955322,
+    "origin": [
+      -38.25,
+      -27.950000000000003
+    ],
+    "capacity_reached": false,
+    "error": null,
+    "build_ms": 70.72,
+    "update_count": 84
+  },
+  "region_areas": {
+    "R0": 65.993,
+    "R1": 11.505,
+    "R2": 2.628,
+    "R3": 2.983
+  }
+}

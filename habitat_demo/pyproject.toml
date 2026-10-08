@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lightnav-habitat-web"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = ["aiohttp>=3.9,<4", "numpy", "pillow"]
+
+[project.scripts]
+habitat-web = "habitat_web.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["habitat_web*", "room_memory*"]
+
+[tool.setuptools.package-data]
+habitat_web = ["web/*"]
+room_memory = ["config/*.json", "config/*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

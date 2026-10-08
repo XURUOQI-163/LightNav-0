@@ -1,0 +1,12 @@
+{
+  "mode": "real Habitat RGB-D + fixed fake local policy + real Places365 CPU inference",
+  "room_type": "corridor",
+  "semantic_status": "ready",
+  "confidence": 0.6528896689414978,
+  "steps": 30,
+  "trajectory_points": 20,
+  "room_nodes": 1,
+  "reset_session_changed": true,
+  "page_errors": [],
+  "dropped_frames": 0
+}
