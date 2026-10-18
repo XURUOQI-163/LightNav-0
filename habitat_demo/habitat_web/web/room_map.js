@@ -60,7 +60,8 @@
   };
 
   function renderLive(next) {
-    text("room-live-title", `当前画面 · ${providerName(next.semantic_backend)}`);
+    const source = element("camera-views")?.classList.contains("three-views") ? "导航相机关键帧" : "当前画面";
+    text("room-live-title", `${source} · ${providerName(next.semantic_backend)}`);
     const live = next.live_semantic;
     element("room-live").hidden = !next.enabled || live?.enabled === false;
     if (!next.enabled || live?.enabled === false) return;
@@ -188,6 +189,27 @@
     const portals = items(snapshot.portals).filter(hasXY);
     const allPoints = [...trajectory, ...anchors.values(), ...portals];
     const showRegions = element("room-regions-toggle").checked;
+    const semanticMap = snapshot.semantic_map;
+    const showSemantics = !!semanticMap?.enabled && element("room-semantic-toggle").checked;
+    const legend = element("room-semantic-legend");
+    legend.replaceChildren();
+    if (showSemantics) items(semanticMap.labels).forEach((label, index) => {
+      const entry = document.createElement("span");
+      const swatch = document.createElement("i");
+      swatch.style.backgroundColor = semanticMap.colors[index];
+      entry.append(swatch, document.createTextNode(label));
+      legend.append(entry);
+    });
+    const statuses = {waiting: "等待同步 RGB-D", processing: "正在分类图像", ready: "已融合",
+      filtered: "当前视图因低分或类别接近，已跳过", error: "投影失败", no_visible_depth: "当前帧无可投影深度", geometry_disabled: "需启用二维几何地图"};
+    text("room-semantic-status", semanticMap?.enabled
+      ? `语义投影（${semanticMap.view_mode === 'full' ? '整图' : semanticMap.view_mode === 'left_right' ? '左右子图' : '视图'}）：${statuses[semanticMap.status] || semanticMap.status} · 有证据格子 ${semanticMap.evidence_cells || 0} · 最近过滤帧 ${timeText(semanticMap.filter_timestamp)} · 采纳 ${semanticMap.accepted_views || 0} / 过滤 ${semanticMap.rejected_views || 0} · 已融合源帧 ${timeText(semanticMap.source_timestamp)}${semanticMap.error ? " · " + semanticMap.error : ""}`
+      : "语义投影未启用（需要 CLIP 与二维几何地图）");
+    const bounds = semanticMap?.bounds;
+    if (showSemantics && Array.isArray(bounds) && bounds.length === 4 && bounds.every(Number.isFinite)) {
+      allPoints.push({x: bounds[0], y: bounds[1]}, {x: bounds[2], y: bounds[3]});
+    }
+
     if (showRegions) for (const room of rooms) for (const polygon of regionPolygons(room)) allPoints.push(...polygon.outer);
     if (hasXY(snapshot.current_pose)) allPoints.push(snapshot.current_pose);
     if (hasXY(snapshot.start_pose)) allPoints.push(snapshot.start_pose);
@@ -212,7 +234,7 @@
     for (let x = 24; x < width; x += 32) svg.append(shape("line", { x1: x, y1: 0, x2: x, y2: height, class: "room-grid" }));
     for (let y = 24; y < height; y += 32) svg.append(shape("line", { x1: 0, y1: y, x2: width, y2: y, class: "room-grid" }));
     if (showRegions) for (const room of rooms) {
-      const color = roomColor(room.room_id);
+      const color = showSemantics ? "#64748b" : roomColor(room.room_id);
       for (const polygon of regionPolygons(room)) {
         const rings = [polygon.outer, ...items(polygon.holes).filter((r) => Array.isArray(r) && r.length >= 3 && r.every(hasXY))];
         const path = rings.map((ring) => `M${ring.map(position).join(" L")} Z`).join(" ");
@@ -232,6 +254,13 @@
         svg.append(shape("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y,
           class: "room-structural-wall", stroke: color }));
       }
+    }
+    if (showSemantics && semanticMap.image?.startsWith("data:image/png;base64,") && bounds?.length === 4) {
+      const topLeft = project({x: bounds[0], y: bounds[3]});
+      const layer = shape("image", {href: semanticMap.image, x: topLeft.x, y: topLeft.y,
+        width: (bounds[2] - bounds[0]) * scale, height: (bounds[3] - bounds[1]) * scale,
+        preserveAspectRatio: "none", class: "room-semantic-raster", "pointer-events": "none"});
+      svg.append(layer);
     }
     if (trajectory.length) svg.append(shape("polyline", { points: trajectory.map(position).join(" "), class: "room-trajectory" }));
     for (const portal of portals) {
@@ -388,6 +417,7 @@
   }
 
   new ResizeObserver(renderMap).observe(svg);
+  element("room-semantic-toggle").addEventListener("change", renderMap);
   element("room-regions-toggle").addEventListener("change", renderMap);
   window.addEventListener("pagehide", () => {
     stopped = true;

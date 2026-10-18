@@ -37,8 +37,6 @@ def test_clip_selection_preserves_places_defaults_and_uses_own_environment():
         "dining room",
         "office room",
         "gym",
-        "lounge",
-        "laundry room",
         "corridor",
     ]
 
@@ -184,7 +182,7 @@ async def test_compare_runs_both_models_on_identical_images(tmp_path):
         assert result["representative_frame_id"] == "F0"
         assert result["warm_request_ms"] > 0
         assert result["metadata"]["backend"] == backend
-    assert len(report["results"]["clip"]["probabilities"]) == 10
+    assert len(report["results"]["clip"]["probabilities"]) == 8
     assert len(report["results"]["places365"]["probabilities"]) == 365
 
 

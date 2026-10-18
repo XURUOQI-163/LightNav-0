@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import copy
 import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -29,6 +30,7 @@ class RoomMemoryService:
         doorway_config=None,
         doorway_detector=None,
         region_config=None,
+        projection_config=None,
     ):
         self.config = memory_config
         DepthPortalDetector(geometry_config)  # Validate before starting workers/EGL.
@@ -70,6 +72,9 @@ class RoomMemoryService:
         self.live = LiveSceneRecognition(self.classifier, live_enabled, live_interval)
         describe = getattr(self.classifier, "metadata", None)
         self.semantic_metadata = describe() if describe else dict(backend=self.semantic_backend)
+        from .projection_worker import SemanticProjectionWorker
+
+        self.projection = SemanticProjectionWorker(self, projection_config)
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="room-memory")
         self.doorway_config = doorway_config or {"enabled": False}
         self.doorway_detector = doorway_detector
@@ -112,7 +117,7 @@ class RoomMemoryService:
     @property
     def cache(self):
         # Recompute age even when navigation is paused and geometry is unchanged.
-        return dict(self._cache, live_semantic=self.live.snapshot())
+        return dict(self._cache, live_semantic=self.live.snapshot(), semantic_map=dict(self.projection.state))
 
     async def start(self):
         self.queue = asyncio.Queue(maxsize=self.config.queue_size)
@@ -125,6 +130,8 @@ class RoomMemoryService:
         ]
         if self.live.enabled:
             self.tasks.append(self.live.start())
+        if self.projection.enabled:
+            self.tasks.append(self.projection.start())
         if self.depth_verifier is not None:
             self.tasks.append(asyncio.create_task(self._doorway_worker()))
 
@@ -137,6 +144,7 @@ class RoomMemoryService:
     async def reset(self):
         self.generation += 1
         self.live.reset()
+        self.projection.reset()
         self._drain(self.queue)
         self._drain(self.semantic_queue)
         self._drain(self.doorway_queue)
@@ -174,6 +182,8 @@ class RoomMemoryService:
             self.queue.get_nowait()
             self.queue.task_done()
             self.dropped_frames += 1
+        if self.projection.enabled:
+            observation = copy.deepcopy(observation)
         self.queue.put_nowait((self.generation, self.manager, observation))
 
     def _frame(self, observation):
@@ -205,6 +215,13 @@ class RoomMemoryService:
     async def _refresh(self):
         manager, generation = self.manager, self.generation
         snapshot = await self._call(manager.snapshot)
+        evidence_map = self.projection.map
+        if evidence_map is not None:
+            raster = await self._call(evidence_map.snapshot)
+            if generation == self.generation:
+                # Newly confirmed structural walls also mask previously fused color.
+                for key in ("image", "bounds", "evidence_cells"):
+                    self.projection.state[key] = raster[key]
         if generation == self.generation:
             snapshot.update(
                 session_id=self.session_id,
@@ -236,6 +253,8 @@ class RoomMemoryService:
                     continue
                 frame = self._frame(observation)
                 requests = await self._call(manager.observe, frame)
+                if generation == self.generation:
+                    self.projection.offer(frame, manager)
                 if generation == self.generation:
                     self.error = None
                 await self._enqueue_semantics(generation, manager, requests)

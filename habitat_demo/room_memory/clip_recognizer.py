@@ -38,8 +38,6 @@ DEFAULT_LABELS = (
     "dining room",
     "office room",
     "gym",
-    "lounge",
-    "laundry room",
     "corridor",
 )
 DEFAULT_TEMPLATES = (

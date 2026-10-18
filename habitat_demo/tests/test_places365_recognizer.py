@@ -15,8 +15,8 @@ from PIL import Image
 from room_memory.config import load_config
 from room_memory.semantics import SemanticFrame
 
-PLACES = Path("/home/xrq/projects/places365")
-PYTHON = Path("/home/xrq/.conda/envs/places365/bin/python")
+PLACES = Path.home() / "projects/places365"
+PYTHON = Path.home() / ".conda/envs/places365/bin/python"
 
 
 def module():

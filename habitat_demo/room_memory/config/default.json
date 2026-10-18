@@ -57,8 +57,8 @@
   },
   "semantic": {
     "backend": "places365",
-    "repo_path": "/home/xrq/projects/places365",
-    "python_executable": "/home/xrq/.conda/envs/places365/bin/python",
+    "repo_path": "/data/disk1/xrq/projects/places365",
+    "python_executable": "/data/disk1/xrq/.conda/envs/places365/bin/python",
     "mode": "subprocess",
     "device": "cpu",
     "num_threads": 2,
@@ -69,8 +69,8 @@
   },
   "regions": {
     "enabled": true,
-    "cell_size": 0.05,
-    "grid_size": 1024,
+    "cell_size": 0.2,
+    "grid_size": 256,
     "update_interval": 0.75,
     "depth_min": 0.2,
     "depth_max": 6.0,
@@ -93,9 +93,9 @@
     "enabled": true,
     "queue_size": 2,
     "detector": {
-      "python_executable": "/home/xrq/.conda/envs/navigation/bin/python",
-      "model_path": "/home/xrq/projects/LightNav-0/habitat_demo/.models/yoloe/yoloe-26s-seg.pt",
-      "prompt_cache_path": "/home/xrq/projects/LightNav-0/habitat_demo/.models/yoloe/opening-prompts.pt",
+      "python_executable": "/data/disk1/xrq/.conda/envs/navigation/bin/python",
+      "model_path": "/data/disk1/xrq/projects/LightNav-0/habitat_demo/.models/yoloe/yoloe-26s-seg.pt",
+      "prompt_cache_path": "/data/disk1/xrq/projects/LightNav-0/habitat_demo/.models/yoloe/opening-prompts.pt",
       "labels": [
         "doorway",
         "open doorway",
@@ -134,5 +134,14 @@
       "max_plane_angle_deg": 80.0,
       "roi_inset": 0.05
     }
+  },
+  "semantic_projection": {
+    "enabled": true,
+    "interval": 1.5,
+    "max_weight": 20.0,
+    "filter_low_confidence": true,
+    "low_top1_threshold": 0.35,
+    "top3_spread_threshold": 0.1,
+    "view_mode": "full"
   }
 }

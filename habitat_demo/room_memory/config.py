@@ -77,6 +77,7 @@ def load_config(path=None, semantic_backend=None):
         "semantic",
         "doorway",
         "regions",
+        "semantic_projection",
     }:
         raise ValueError(
             "room memory config requires memory/geometry/semantic/doorway/regions objects"
@@ -177,3 +178,13 @@ def load_doorway_config(path=None):
     if type(result["queue_size"]) is not int or not 1 <= result["queue_size"] <= 8:
         raise ValueError("doorway.queue_size must be 1..8")
     return result
+
+
+def load_projection_config(path=None):
+    from .semantic_projection import ProjectionConfig
+
+    value = json.loads(Path(path).read_text()) if path else {}
+    try:
+        return ProjectionConfig(**value.get("semantic_projection", {}))
+    except TypeError as exc:
+        raise ValueError("unknown semantic_projection configuration key") from exc

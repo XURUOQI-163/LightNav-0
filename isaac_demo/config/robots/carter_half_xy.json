@@ -1,0 +1,9 @@
+{
+  "robot_profile": "half_xy",
+  "robot_xy_scale": 0.5,
+  "robot_height": 0.663,
+  "footprint": [[-0.2155, -0.1575], [0.1395, -0.1575], [0.1395, 0.1575], [-0.2155, 0.1575]],
+  "wheel_radius": 0.12,
+  "wheel_base": 0.27,
+  "camera_offset": [0.2, 0.0, 0.6]
+}

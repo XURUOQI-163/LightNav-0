@@ -142,10 +142,12 @@ cd ~/projects/LightNav-0/habitat_demo
 
 ## CLIP 与 Places365 可选后端
 
-新增 `clip_recognizer.py`：通过已有 `omnivla` 环境的常驻 CPU 子进程加载本地 OpenAI CLIP ViT-B/32；默认类别为 bedroom、living room、bathroom、kitchen、dining room、office room、gym、lounge、laundry room、corridor。文本模板先编码、归一化和平均，每张 RGB 计算候选类别内的分数；多视图仍平均每帧概率后取 Top-1，不按阈值过滤。两种模型不决定 Room ID 或门户跨越。
+新增 `clip_recognizer.py`：通过已有 `omnivla` 环境的常驻 CPU 子进程加载本地 OpenAI CLIP ViT-B/32；默认类别为 bedroom、living room、bathroom、kitchen、dining room、office room、gym、corridor。文本模板先编码、归一化和平均，每张 RGB 计算候选类别内的分数；多视图仍平均每帧概率后取 Top-1，不按阈值过滤。两种模型不决定 Room ID 或门户跨越。
 
 在原 Habitat 命令中增加 `--room-semantic-backend clip`，改为 `places365` 即切回原识别器。默认配置仍保留 Places365；CLI 切换只替换语义后端，详情见 [配置说明](../CONFIGURATION.md)。网页实时标题和 `semantic_metadata` 记录实际后端。修改后重启 Habitat 并刷新网页，保留 LightNav/OmniVLA 模型服务。
 
-`compare_semantics.py` 用同一组 1–5 张房间 JPEG 串行调用两个后端，保存图像 SHA256、首轮/热模型请求耗时、类别分布和配置。两个后端候选类别数不同，分数不可直接比较为准确率。CLIP 的固定类别更贴合当前 Room Node 定义，但其实际准确率需要同图人工标注对比；特别要观察 living room/lounge 等相似类别的混淆。
+`compare_semantics.py` 用同一组 1–5 张房间 JPEG 串行调用两个后端，保存图像 SHA256、首轮/热模型请求耗时、类别分布和配置。两个后端候选类别数不同，分数不可直接比较为准确率。CLIP 的固定类别更贴合当前 Room Node 定义，但其实际准确率需要同图人工标注对比；特别要观察 living room/dining room 等相似类别的混淆。
 
 参考：[OpenAI CLIP](https://github.com/openai/CLIP)、[Places365](https://github.com/CSAILVision/places365)。本次同图联调报告见 [JSON](../docs/clip-places365-comparison-20261007.json)，它只有一张图，不是准确率基准。
+
+2026-10-16：CLIP 长期语义图默认使用整图（view_mode=full，左右子图保留为 left_right 选项）、8 类、无固定 3 米投影半径；融合前过滤低分或接近的 Top3。节点与实时分类仍保留原行为，详见 [语义投影](SEMANTIC_PROJECTION.md)。

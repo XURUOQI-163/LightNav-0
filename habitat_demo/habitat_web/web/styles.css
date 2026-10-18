@@ -45,6 +45,10 @@ textarea { resize: vertical; line-height: 1.6; }
 select:disabled, textarea:disabled { opacity: .65; }
 .primary { width: 100%; margin-top: 14px; padding: 12px; color: #fff; background: var(--accent); border: 0; border-radius: 4px; font-weight: 700; }
 .hint { margin: 10px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.manual-controls { margin: 0 16px 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.manual-controls h3 { margin: 0; font-size: 13px; }
+.manual-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.manual-grid button { padding: 10px; color: var(--ink); background: #12151a; border: 1px solid var(--line); border-radius: 4px; }
 .safety-row { padding: 0 16px 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .safety-row button { padding: 11px; border-radius: 4px; font-weight: 700; }
 .stop { color: #ffd7d3; background: rgba(255,102,92,.08); border: 1px solid rgba(255,102,92,.42); }
@@ -133,3 +137,31 @@ select:disabled, textarea:disabled { opacity: .65; }
 .room-live-head span { color: #a9b5c7; }
 .room-live-result { margin: 8px 0; font-size: 18px; color: var(--scene-accent); overflow-wrap: anywhere; }
 .room-live .hint { margin: 0; font-size: 12px; }
+
+.view-note { color:var(--muted); font-size:11px; line-height:1.6; margin:10px 16px; }
+.live-metrics { grid-template-columns:repeat(4,minmax(0,1fr)); border-top:1px solid var(--line); }
+@media(max-width:560px) { .live-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+
+.startup-panel { margin: 0 16px 12px; padding: 12px; border: 1px solid #38404b; border-radius: 8px; background: #19212b; }
+.startup-panel span { display: block; margin-top: 6px; color: #a8c9ed; font-variant-numeric: tabular-nums; }
+.startup-panel p { margin: 6px 0 0; color: #b9c3ce; font-size: 13px; line-height: 1.5; }
+
+.shell.multi-view { width: min(1920px, 100%); grid-template-columns: minmax(0, 1fr) 300px; }
+.camera-views { display: grid; grid-template-columns: minmax(0, 1fr); }
+.camera-views.three-views { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 0 12px 12px; }
+.camera-tile { min-width: 0; }
+.camera-tile h2 { margin: 0; padding: 12px; font-size: 13px; color: var(--muted); }
+.three-views .camera-tile { border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+@media (max-width: 1100px) { .shell.multi-view { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 600px) { .camera-views.three-views { grid-template-columns: minmax(0, 1fr); } }
+/* Local geometry stays available without Room Memory / semantic workers. */
+.local-navigation-panel { grid-column:1 / -1; }
+#local-map { display:block; width:min(100%,640px); height:auto; margin:0 auto; }
+
+/* Semantic raster is located in world XY; cells retain fixed class colors. */
+.room-semantic-raster { image-rendering: pixelated; }
+.room-semantic-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 8px 16px; font-size: 12px; }
+.room-semantic-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.room-semantic-legend i { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+
+.room-semantic-status { margin: 8px 16px; }

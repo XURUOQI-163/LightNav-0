@@ -228,3 +228,263 @@ resolution, update interval, depth limits and single-floor height protection.
 
 The Habitat viewer defaults to `--max-steps 0` (unlimited). A positive integer enables
 an explicit action limit; `/api/state.stop_reason` and the page report why navigation stopped.
+
+## Isaac Sim / Carter Web Adapter
+
+The independent `isaac_demo/run.sh` entry uses the existing `omninavbench` environment.
+It keeps Habitat's model client. Isaac LightNav supports concurrent inference and tracking;
+OmniVLA keeps its existing step-locked loop. Default web port: **8091**.
+Full CLI flags, JSON sensor/physics parameters, model launch environment variables and HTTP contracts:
+[`isaac_demo/README.md`](../isaac_demo/README.md#参数).
+
+```bash
+cd isaac_demo
+MODEL_GPU=1 ./start_model.sh lightnav  # separate terminal; or omnivla
+./run.sh --gpu 0 --host 0.0.0.0 --port 8091 --room-memory --room-semantic-backend clip
+```
+
+`--max-steps 0` means unlimited actions but preserves model STOP. `--scene` overrides require
+an explicit `--spawn X Y Z YAW_DEG`; JSON spawn yaw is radians, CLI yaw is degrees.
+`ISAAC_PYTHON` can select a different already-configured Isaac Python. `MODEL_GPU` defaults to 1
+in `start_model.sh`; LightNav's `PORT` defaults to 8050. No model parameters or checkpoints are modified.
+
+Isaac LightNav tracking/scheduling switches (OmniVLA and Habitat retain their existing loops):
+
+| Flag | Default | Behaviour |
+| --- | --- | --- |
+| `--mpc` / `--no-mpc` | `--no-mpc` | Reuse `mujoco_demo/vln_mujoco/mpc.py`'s CasADi/IPOPT controller instead of the simple follower. |
+| `--realtime-update` / `--no-realtime-update` | `--realtime-update` | One asynchronous request while tracking the current path; swap predictions between control steps. Disabled: request after path completion / confirmed local execution failure. |
+| `--path-position-tolerance` | `0.10` m | Completion position error, positive and at most 0.5 m. |
+| `--path-yaw-tolerance-deg` | `10` degrees | Completion heading error, positive and at most 45 degrees. |
+| `--path-timeout` | `60` simulated seconds | Per-prediction simulated-time budget including recovery. Local batch mode requests a replacement on expiry; without local navigation it stops. |
+
+Use `--mpc --no-realtime-update` for segment execution; add `--local-navigation` for incremental corrections and failure-triggered predictions.
+The official horizon (5), timestep (0.1 s), Q/R costs and acceleration limits are retained;
+`--max-linear`/`--max-angular` set the velocity bounds. MPC uses 0.1 simulated seconds
+per executed command regardless of `--dt`; `--dt` still applies to simple tracking,
+manual defaults and recovery. Rendering/IPC time means this is not guaranteed wall-clock 10 Hz.
+CasADi is already available in this installation's `omninavbench` environment; no environment
+changes are required. Imports are lazy and no MPC solver is constructed with `--no-mpc`.
+
+Isaac LightNav uses `isaac_demo/isaac_web/execution.py`; the original shared
+`Runtime._run` remains available for Habitat and OmniVLA.
+`realtime_prediction.py` owns at most one pending model request. It freezes input JPEG,
+timestamp, calibration and pose together; new predictions are applied between control steps.
+Current safe motion continues during inference. At the end of the available path the robot
+holds still until the result arrives. STOP/reset/error drains the pending request, and a
+model STOP received during a solver call prevents that stale command from being executed.
+`tracking.asynchronous_prediction` and `tracking.inference_pending` expose this scheduling.
+The JSON `render_frames` now controls startup warmup only (default 4). Steady RGB-D
+observations and previews each schedule one explicit synchronous sensor capture, retrying
+only absent/empty buffers. Capture does not advance physics; copied RGB-D shares its pose.
+Capture-time pose transforms the path to fixed world coordinates. Tracking advances
+monotonically along the path and checks final position AND heading; ten output points
+do not imply ten control steps or exact visits to every point. With local navigation,
+completion refers to the reachable, corrected final goal. A safe prefix or detour to an
+earlier waypoint cannot count as full completion. Local batch mode continues repairing the original prediction rather than stopping at that prefix.
+Current RGB-D continues to update the local map and every command still passes the guard.
+Blocked commands try local correction and the existing depth-directed recovery. In batch
+mode, `incremental_execution.py` retains the original world path and periodically repairs its remaining suffix.
+After repeated local failures and one recovery attempt per prediction, it requests a fresh model
+path from the latest image. In realtime mode recovery can request a fresh path immediately.
+`path_already_reached` stops stationary/near-zero predictions to avoid an idle request loop.
+Model STOP, user STOP, solver failures and `--max-steps` take precedence.
+The page and `/api/state.tracking` expose controller, update mode, request count, completed
+paths and path progress. `local_replans`, `model_replans`, `failure_confirmations` and
+`last_reprediction_reason` distinguish geometric repairs from failure-triggered model requests.
+`/api/state.tracking_config` records launch options. Restart only
+the Isaac web process after changing flags; the model service is unchanged.
+
+Local batch execution (`--local-navigation --no-realtime-update`) uses these JSON fields
+in `isaac_demo/config/local_navigation.json`:
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `path_replan_interval_s` | 0.5 | Minimum simulated time between periodic repairs on a newer map (0.1–5). Prefix completion, guard rejection and stalls force an earlier repair. |
+| `path_failure_confirmations` | 3 | Failed local attempts on refreshed observations before recovery/fallback (integer 2–20). |
+| `path_no_progress_s` | 8 | Simulated seconds without meaningful movement; try recovery once, then replace the prediction if still stalled (1–120). |
+| `path_progress_translation_m` | 0.05 | Net translation that refreshes the progress timer (0.01–0.5); pure-turn predictions can also advance by heading error reduction. |
+| `model_replan_limit` | 3 | Maximum additional failed-prediction retries without translation (integer 1–10); stop with `model_replan_limit` if exhausted. |
+
+Retry budget resets on actual translation of `recovery_reset_translation_m` (default 0.2 m)
+or completion of a full path. A failed planning attempt is not proof of global geometric
+unreachability: the detector means unexecutable within current observations and bounded budgets.
+Stationary confirmation steps collect fresh RGB-D while commanding zero velocity. The model
+request always uses the latest frame; no overlapping requests or automatic socket reconnects
+are introduced. Pose/map session discontinuities stop instead of reusing old world coordinates.
+The blue map points retain the entire original prediction; `remaining_start_index` marks progress,
+and a corrected `goal_index` refers to the original prediction, not the shortened suffix.
+
+Isaac `--display-fps` overrides JSON `display_fps` (default 15, range 0–60; 0 disables
+intermediate display frames). It is a simulated-time sampling target, not guaranteed browser FPS.
+JSON `chase_distance` / `chase_height` / `chase_target_height` default to 1.8 / 1.3 / 0.3 metres.
+The chase camera is display-only. Navigation RGB-D and Room Memory remain on the front camera.
+The page displays live first person, third person and the prediction-aligned input snapshot
+side by side (stacked on narrow screens), with independent polling and no view switching.
+`/api/display.jpg?view=first|third&after=FRAME_ID` serves the latest display cache (204 if unchanged).
+Additional state timing fields are `physics_ms`, `render_ms`, `step_wall_ms`, `motion_phase`;
+physics still waits for the model between bounded actions. See the adapter README for timing definitions.
+
+
+Isaac JSON `normalize_mdl_paths` is a strict boolean, default `true`.
+`--no-normalize-mdl-paths` disables it for comparison with the previous loading path.
+The normalizer rewrites resolved local MDL sourceAsset aliases to canonical real paths in
+an anonymous USD session layer; it does not save asset files or merge shader parameters.
+Remote, unresolved, packaged and time-varying sources are skipped. Synchronous asset loading stays enabled.
+
+The Isaac CLI starts HTTP before scene initialization finishes. `/api/state.scene_ready`
+is false until the initial RGB-D observation is published; start/stop/reset/manual remain
+blocked during loading or failed initialization. `/api/state.startup` provides `phase`,
+`message`, `elapsed_s`, `phase_elapsed_s`, and optional `mdl_paths` statistics
+(`rewritten`, `aliases`, `canonical_files`, `skipped`). Elapsed time is computed by the web
+process even while the worker waits for materials; no percentage or completion ETA is inferred.
+Startup failures remain visible over HTTP until the operator restarts the service.
+The default `--startup-timeout 1800` still limits the worker startup, independent of
+model `--timeout` and subsequent scene `--command-timeout` calls.
+
+`startup.phase=readback` identifies initial RGB/depth/third-person buffer validation after
+warm-up renders. Each completed initial render updates the message; it is not a material
+compilation percentage. Initialization tracebacks are sent before Kit shutdown. An unexpected
+worker EOF includes its PID, available exit code and last reported phase.
+
+Isaac JSON `camera_ready_max_renders` (integer 1–600, default 60) and
+`camera_ready_timeout_s` (finite >0 and <=300 seconds, default 30) bound extra
+sensor capture attempts after normal warm-up renders. `startup.phase=sensor_wait`
+reports missing front RGB, depth or chase RGB. Missing buffers trigger a zero-delta
+Replicator capture with physics updates guarded off; nonempty wrong-sized buffers fail.
+The time budget is checked between calls, not a native-call interrupt; worker startup
+and command timeouts still bound blocking calls. These are JSON settings, not CLI flags.
+
+Once fallback enables explicit capture, that worker explicitly schedules each subsequent
+observation and preview too: Replicator STEPPED state must not allow old nonempty buffers
+to masquerade as fresh frames. This can add rendering wall time without changing action dt.
+
+Isaac `--robot-profile original|half_xy` overrides JSON `robot_profile` (default `original`).
+The profiles live in `isaac_demo/config/robots/carter_{original,half_xy}.json` and are
+authoritative for wheel radius, wheel track, camera offset and footprint; edit these files
+rather than the legacy duplicated wheel/camera fields in the scene JSON.
+`half_xy` halves horizontal dimensions while retaining overall height. Wheel radius/track
+become 0.12/0.27 m; front camera offset becomes [0.2,0,0.6] m. FOV, resolution and spawn
+height stay unchanged. Circular wheels are resized uniformly and moved down by the lost
+radius. Body geometry, mass and joint anchors are adjusted before PhysX initialization
+in anonymous runtime layers; source assets are never saved. Dynamic rigid-body TRS and
+initial velocities are authored in the runtime root layer so PhysX can update them;
+static geometry and joint changes use the session layer. Only Carter V1 is supported
+by the half_xy adapter. This is a navigation proxy, not a calibrated Limo dynamics model.
+Footprints are conservative root-frame rectangles: original x=[-0.431,0.279],
+y=[-0.315,0.315]; half_xy halves these bounds. Both room doorway detectors receive the
+selected width. Minimum opening width becomes max(profile width + safety margin,
+configured minimum opening width * horizontal scale); safety margins stay in metres.
+`/api/state.robot_geometry` exposes the selected dimensions. Without `--local-navigation`,
+footprint configuration alone does not add obstacle avoidance. Restart the Isaac
+web process to change profiles; the model service can remain running.
+
+Isaac `--local-navigation` opts into a separate spatial occupancy map, footprint-aware
+path correction. Its default `planning_only` mode does not collision-filter velocity commands. It leaves model inference
+and the existing follower unchanged. `--local-navigation-config PATH` defaults to
+`isaac_demo/config/local_navigation.json`; `--local-map-radius METRES` overrides its
+`window_radius_m` (default **5.0**, allowed 1–10). The window is a robot-centred circle;
+there is no observation TTL. Room Memory and CLIP are independent optional features.
+
+The web panel shows raw/corrected paths and offers trajectory-correction/manual-observation modes.
+`initial_clear_radius_m` is currently 1.5 m in the user-edited JSON (the Python
+fallback when omitted is 2.0 m; allowed 0–3 m, clipped to the window; 0 disables).
+With the current forward camera, visible floor begins roughly 1.3 m ahead of the
+robot; a 1 m prior can leave an unknown gap. Use 2 m only when the birth area is
+known to be clear.
+On startup or explicit reset, unknown cells near the birth pose receive a one-time
+free-space prior, separately tracked from observed floor. Measured obstacles always
+win, including the first scan. New floor/obstacle evidence replaces prior cells;
+the remaining prior stays at its original world position and is never replenished
+after spatial eviction or a pose discontinuity. The page shows it in pale cyan.
+Unknown space remains unknown in the map; it does not veto commands in planning-only mode.
+`near_blind_clear_distance_m` (default **1.5 m**, allowed 0–3; **0 disables**) adds
+a separate near-camera prior on each new calibrated observation. After depth
+integration, only currently unknown floor cells in front of the robot, inside the
+camera horizontal FOV but projecting below its bottom image boundary, and within
+this robot-centred distance, can be initialized as free. This is an AND condition;
+invalid depth inside the visible image does not qualify, nor do rear/side unknowns.
+The prior stays in world coordinates until real floor/obstacle evidence replaces it
+or it leaves the spatial window. Each cell is initialized at most once while retained
+in that window. Occupancy and footprint inflation still take precedence. These
+cells are pale cyan and counted separately in `near_blind_clearance.remaining_cells`
+on `GET /api/local-navigation`. This affects only the local navigation map, not
+Room Memory geometry or semantics. Restart the Isaac web process after changing it.
+Observation mode forbids automatic navigation but does **not** collision-filter manual
+commands. Mode changes require idle state; reset clears the map and restores planning-only mode.
+`GET /api/local-navigation` is read-only. `POST /api/local-navigation-mode` takes
+`{"mode":"planning_only"}` or `{"mode":"observe_only"}`. The explicit legacy `guarded` API mode is retained for comparison; the page does not enable it. Parameters, limitations and JSON
+contracts are in [`local_navigation/README.md`](../isaac_demo/local_navigation/README.md).
+
+Local path correction now uses `planning_policy=known_obstacles_only`: unknown
+waypoints are retained; only intersections with known footprint-inflated occupancy
+trigger a detour search. Swept segments are checked too, including known map crossings
+between unknown endpoints. Outside-window prediction suffixes are retained if no
+known collision is found; validation clips its sampling to the finite map.
+Detour search stays inside the local window but may use unknown cells, with clearance
+costs based on known obstacles only. Map labels are unchanged. The default execution
+path does not check occupancy, unknown space, or window bounds before sending a
+command. An occupied start retains the original departure prefix up to the first
+clear model point and repairs the suffix; it does not clear occupied cells. If no
+correction is available, `status=fallback` retains the original prediction and
+records the reason. Yellow path segments are unvalidated, not certified clear.
+`execution_collision_check=false` identifies this policy; `collided` observations
+do not trigger a stop or recovery. Model STOP, user stop, invalid data/solver errors,
+step limits and existing timeout/no-progress handling remain effective. This is the default local-navigation
+planning behaviour, needs no new CLI flag, and takes effect after restarting the Isaac
+web process. `--no-realtime-update` and realtime request scheduling are unaffected.
+
+Only in the explicit legacy `guarded` mode, `config/local_navigation.json` controls
+depth-guided recovery: `recovery_max_turn_deg=0` (disabled by default; a positive
+value explicitly enables the optional behavior described below),
+`recovery_angular_speed=0.35` rad/s (capped by `--max-angular`),
+`recovery_forward_distance_m=0.5`, and `recovery_reset_translation_m=0.2`.
+Left/right image regions use x=5–45% / 55–95%, y=`recovery_roi_top=0.25` to
+`recovery_roi_bottom=0.65`. Select the greater `recovery_depth_percentile=30`
+of valid depth; each region needs `recovery_min_valid_fraction=0.2` valid samples.
+Invalid depth is not interpreted as open space. Each burst keeps its selected
+direction, updates RGB-D/map after every small turn, and requests fresh model
+waypoints once the forward swept footprint is clear. Consecutive bursts share
+the turn budget until the configured translation threshold is reached.
+Only recovery's zero-linear-velocity rotation bypasses collision checks, per the
+user's simulation assumption. Translation and manual commands retain existing
+checks. Stop/Reset and nonzero `--max-steps` still apply; missing depth or exhausted
+budget ends recovery. `/api/state.recovery` exposes direction, scores and budget.
+No model-service changes or extra CLI flags are required; restart the Isaac web
+process and hard-refresh the browser. Habitat's default recovery hooks do nothing.
+
+### CLIP room semantic evidence layer (Habitat / Isaac)
+
+With `--room-memory --room-semantic-backend clip`, the existing room-memory
+JSON accepts `semantic_projection`. It is enabled by default and requires
+`regions.enabled=true`. Set `semantic_projection.enabled=false` to disable
+computation; the page's “CLIP 语义投影” checkbox only hides the layer.
+Defaults: `view_mode="full"`, `interval=1.5` wall seconds, no fixed projection radius,
+`max_weight=20`. Projection now shares the long-term structural map’s per-column
+farthest observations and `regions` depth/height/sampling options. Nearby furniture
+does not truncate an otherwise observed far wall. There is no semantic endpoint inset.
+These parameters do not change `--local-map-radius`, MPC or navigation requests.
+Restart the web/simulator process after configuration changes.
+
+Each projected sample owns its synchronized RGB-D, timestamp, calibration and
+capture pose. The default full image (letterboxed to square, preserving its complete FOV)
+yields one class distribution per projection sample. Set `view_mode="left_right"` to
+run the retained two-crop implementation instead; it is inactive by default. Angle
+weights use the full-view centre in full mode and each crop centre in split mode;
+only observed depth-visible world cells receive weighted evidence. No Portal is
+required. Existing Room ID colors are replaced by a neutral geometry background
+while this overlay is shown. The room/portal graph remains separately visible.
+API/export: `/api/room-memory` adds `semantic_map`; the session folder saves
+`semantic_map.npz` (sparse full probabilities/weights) and `semantic_map.json`.
+See [projection details and limits](../habitat_demo/room_memory/SEMANTIC_PROJECTION.md).
+
+The CLIP default labels are bedroom, living room, bathroom, kitchen, dining room,
+office room, gym and corridor (8 classes). Before fusion, each view is skipped if
+EITHER Top1 < `low_top1_threshold=0.35` or Top1−Top3 < `top3_spread_threshold=0.10`.
+`filter_low_confidence=true` enables this filter. Scores are normalized candidate
+probabilities, not raw cosine similarity. Skipped views leave unseen cells uncolored
+and preserve existing evidence. API `semantic_map` reports accepted/rejected views,
+reasons and `filter_timestamp` separately from the last fused `source_timestamp`.
+Legacy `semantic_projection` geometry keys (`max_range`, depth/height bounds,
+`endpoint_margin`, sample rows/columns) are accepted but ignored; `regions` owns geometry. The projection domain is the depth-visible
+part of the accumulated structural coverage; walls and invalid depth still limit it.

@@ -47,19 +47,16 @@ class HabitatScene:
             depth_sensor.position = [0.0, camera_height, 0.0]
             depth_sensor.hfov = hfov
             agent.sensor_specifications.append(depth_sensor)
-            focal = width / (2 * math.tan(math.radians(hfov) / 2))
-            self.depth_camera = dict(
-                fx=focal,
-                fy=focal,
-                cx=(width - 1) / 2,
-                cy=(height - 1) / 2,
-                camera_to_robot=[
-                    [0, 0, 1, 0],
-                    [-1, 0, 0, 0],
-                    [0, -1, 0, camera_height],
-                    [0, 0, 0, 1],
-                ],
-            )
+        # RGB and optional depth share calibration; overlays need no depth render.
+        focal = width / (2 * math.tan(math.radians(hfov) / 2))
+        self.depth_camera = dict(
+            width=width, height=height,
+            fx=focal, fy=focal, cx=(width - 1) / 2, cy=(height - 1) / 2,
+            camera_to_robot=[
+                [0, 0, 1, 0], [-1, 0, 0, 0],
+                [0, -1, 0, camera_height], [0, 0, 0, 1],
+            ],
+        )
         self.sim = habitat_sim.Simulator(habitat_sim.Configuration(config, [agent]))
         try:
             if not self.sim.pathfinder.is_loaded:
@@ -122,11 +119,11 @@ class HabitatScene:
             "pose": dict(zip(("x", "y", "z"), map(float, self.position)), yaw=self.yaw),
             "sim_time": self.sim_time,
             "collided": collided,
+            "depth_camera": self.depth_camera,
         }
         if self.enable_depth:
             # Same render/pose as RGB; no UI annotations and no persistent cloud.
             result["depth"] = np.asarray(observations["depth"], dtype=np.float32).copy()
-            result["depth_camera"] = self.depth_camera
         return result
 
     def close(self):

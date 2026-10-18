@@ -8,7 +8,7 @@
     "timeout": 60.0,
     "live_enabled": true,
     "live_interval": 1.0,
-    "labels": ["bedroom", "living room", "bathroom", "kitchen", "dining room", "office room", "gym", "lounge", "laundry room", "corridor"],
+    "labels": ["bedroom", "living room", "bathroom", "kitchen", "dining room", "office room", "gym", "corridor"],
     "templates": ["a photo of a {}.", "a photo of the interior of a {}.", "an indoor scene of a {}."]
   }
 }

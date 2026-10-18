@@ -86,7 +86,12 @@ def main():
     a = parse_args()
     memory = None
     if a.room_memory:
-        from room_memory.config import load_config, load_doorway_config, load_region_config
+        from room_memory.config import (
+            load_config,
+            load_doorway_config,
+            load_projection_config,
+            load_region_config,
+        )
         from room_memory.service import RoomMemoryService
 
         try:
@@ -100,6 +105,7 @@ def main():
                 a.room_memory_output,
                 doorway_config=load_doorway_config(a.room_memory_config),
                 region_config=load_region_config(a.room_memory_config),
+                projection_config=load_projection_config(a.room_memory_config),
             )
         except (OSError, ValueError, TypeError) as exc:
             raise SystemExit(f"Invalid room memory configuration: {exc}") from exc

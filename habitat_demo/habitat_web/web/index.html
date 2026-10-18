@@ -4,25 +4,51 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0e1013">
-  <title>Habitat Navigation</title>
-  <link rel="stylesheet" href="/static/styles.css?v=places-top1-1">
+  <title>Navigation Viewer</title>
+  <link rel="stylesheet" href="/static/styles.css?v=local-nav-1">
   <script src="/static/pointing.js?v=1" defer></script>
-  <script src="/static/app.js?v=stop-reasons-1" defer></script>
-  <script src="/static/room_map.js?v=semantic-backends-2" defer></script>
+  <script src="/static/app.js?v=isaac-three-views-4" defer></script>
+  <script src="/static/room_map.js?v=semantic-evidence-4" defer></script>
+  <script src="/static/local_map.js?v=1" defer></script>
 </head>
 <body>
   <main class="shell">
-    <section class="hero panel" aria-label="Habitat 实时画面">
+    <section id="viewer-panel" class="hero panel" aria-label="仿真实时画面">
       <div class="section-head">
-        <h1>Habitat Viewer</h1>
-        <span class="camera-label">第一人称 RGB</span>
+        <h1 id="viewer-title">Navigation Viewer</h1>
+        <span id="camera-label" class="camera-label">第一人称 RGB</span>
       </div>
-      <div class="camera">
-        <img id="camera-image" alt="Habitat 第一人称 RGB 画面" hidden>
-        <svg id="pointing-overlay" aria-label="LightNav APOS OPOS 预测点" hidden></svg>
-        <p id="camera-message" class="camera-message" role="status">等待场景画面…</p>
+      <p id="view-note" class="view-note" hidden></p>
+      <div id="startup-panel" class="startup-panel" hidden>
+        <strong id="startup-phase">等待场景初始化</strong>
+        <span id="startup-time"></span>
+        <p id="startup-detail"></p>
       </div>
-      <div id="pointing-info" class="pointing-info" hidden></div>
+      <div id="camera-views" class="camera-views">
+        <section id="first-view" class="camera-tile" aria-label="第一人称实时" hidden>
+          <h2>第一人称实时</h2>
+          <div class="camera">
+            <img id="first-camera-image" alt="第一人称实时 RGB 画面" hidden>
+            <p id="first-camera-message" class="camera-message" role="status">等待场景画面…</p>
+          </div>
+        </section>
+        <section id="third-view" class="camera-tile" aria-label="第三人称跟随" hidden>
+          <h2>第三人称跟随</h2>
+          <div class="camera">
+            <img id="third-camera-image" alt="Carter 第三人称跟随画面" hidden>
+            <p id="third-camera-message" class="camera-message" role="status">等待场景画面…</p>
+          </div>
+        </section>
+        <section id="prediction-view" class="camera-tile" aria-label="模型输入与预测点">
+          <h2 id="prediction-title">第一人称 RGB</h2>
+          <div class="camera">
+            <img id="camera-image" alt="模型输入 RGB 画面" hidden>
+            <svg id="pointing-overlay" aria-label="LightNav APOS OPOS 预测点" hidden></svg>
+            <p id="camera-message" class="camera-message" role="status">等待场景画面…</p>
+          </div>
+          <div id="pointing-info" class="pointing-info" hidden></div>
+        </section>
+      </div>
       <div id="room-live" class="room-live" aria-label="当前画面场景识别" hidden>
         <div class="room-live-head"><strong id="room-live-title">当前画面 · 场景识别</strong><span id="room-live-status">等待图像</span></div>
         <p id="room-live-result" class="room-live-result">等待识别</p>
@@ -33,6 +59,12 @@
         <span>仿真时间<strong id="sim-time">—</strong></span>
         <span>执行步数<strong id="step-count">—</strong></span>
         <span>模型推理<strong id="latency">—</strong></span>
+      </div>
+      <div id="live-metrics" class="metrics live-metrics" hidden>
+        <span title="模型请求完整往返耗时，包含服务等待与传输">推理往返<strong id="request-latency">—</strong></span>
+        <span title="上一段运动的物理计算、渲染、图像编码与限速等待总耗时">运动段耗时<strong id="step-latency">—</strong></span>
+        <span title="上一段运动所有画面渲染和 JPEG 编码的累计耗时，是运动段耗时的一部分">渲染与编码<strong id="render-latency">—</strong></span>
+        <span title="最近两秒第一人称实时画面新帧数 / 2；三路不重复计数，等待推理或停止时会降到零">显示新帧率<strong id="display-fps">0.0 FPS</strong></span>
       </div>
     </section>
     <aside class="controls panel">
@@ -48,23 +80,47 @@
         <button class="primary" id="start-button" type="submit" disabled>开始导航</button>
         <p class="hint">输入指令后开始；停止后可更换模型或指令。</p>
       </form>
+      <section id="manual-controls" class="manual-controls" aria-label="手动步进" hidden>
+        <h3>手动步进</h3>
+        <p class="hint">每次执行 0.33 秒；先停止自动导航。</p>
+        <div class="manual-grid">
+          <button id="manual-forward" type="button" disabled>↑ 前进</button>
+          <button id="manual-backward" type="button" disabled>↓ 后退</button>
+          <button id="manual-left" type="button" disabled>↶ 左转</button>
+          <button id="manual-right" type="button" disabled>↷ 右转</button>
+        </div>
+      </section>
       <div class="safety-row">
         <button class="stop" id="stop-button" type="button">停止</button>
         <button class="reset" id="reset-button" type="button" disabled>重置场景</button>
       </div>
       <div class="status-block" role="status" aria-live="polite">
         <strong id="run-status">连接中</strong>
-        <p id="run-detail">正在连接 Habitat 服务…</p>
+        <p id="run-detail">正在连接仿真服务…</p>
       </div>
       <p id="error-message" class="error-message" role="alert" hidden></p>
     </aside>
+    <section id="local-navigation-panel" class="panel local-navigation-panel" hidden>
+      <div class="section-head"><h2>局部占据地图与路径修正</h2><span id="local-map-status">等待观测</span></div>
+      <div class="button-row">
+        <button id="local-map-guarded" type="button">启用轨迹纠正（不拦截运动）</button>
+        <button id="local-map-observe" type="button">手动采图（不拦截碰撞）</button>
+      </div>
+      <p id="local-map-mode" class="hint"></p>
+      <p id="local-map-error" role="alert"></p>
+      <p class="hint">蓝色虚线：原始 waypoint · 绿色实线：修正路径 · 红色：预测碰撞 · 黄色：未知/越界或未经验证的原路径 · 紫色：车体</p>
+      <p class="hint">灰色：未知 · 浅色：观测空闲 · 浅青色：出生点空闲假设 · 深色：障碍 · 橙色：当前朝向的硬膨胀区（其他朝向会重新检查）</p>
+      <canvas id="local-map" width="640" height="640" aria-label="以机器人为中心的局部占据地图及两组轨迹"></canvas>
+      <p id="local-map-detail" class="hint"></p>
+    </section>
     <section id="room-memory-panel" class="room-memory panel" aria-label="二维房间记忆" hidden>
       <div class="section-head room-memory-head">
         <div><h2>房间记忆</h2><p id="room-memory-status" class="hint">等待观测…</p></div>
         <a id="room-memory-export" class="room-export" href="/api/room-memory/export" download>导出 JSON</a>
       </div>
-      <p id="room-map-note" class="room-map-note">这是不完整观测图。彩色范围表示已观测的房间空间，不代表内部处处可通行；虚线边界尚未闭合，实线表示墙体证据。空白可能尚未观测。节点是入口或候选空间的显示锚点；红色仅表示已穿越，不代表完整搜索；类型后的 ? 表示暂定分类。</p>
+      <p id="room-map-note" class="room-map-note">这是不完整观测图。开启语义投影时，颜色表示该格子多视角融合后的房间类别，灰色表示几何已观测但暂无语义证据；颜色不是通行性或精确房间分割。虚线边界尚未闭合，实线表示墙体证据。空白可能尚未观测。节点是入口或候选空间的显示锚点；红色仅表示已穿越，不代表完整搜索；类型后的 ? 表示暂定分类。</p>
       <div class="room-map-legend" aria-label="地图图例">
+        <label><input id="room-semantic-toggle" type="checkbox" checked> CLIP 语义投影</label>
         <label><input id="room-regions-toggle" type="checkbox" checked> 显示房间范围</label>
         <span><i class="legend-trajectory"></i>行走轨迹</span>
         <span><i class="legend-room"></i>已进入空间 / 已穿越门口</span>
@@ -74,6 +130,8 @@
         <span><i class="legend-pose"></i>当前位置 / 朝向</span>
       </div>
       <p id="room-memory-error" class="error-message" role="status" hidden></p>
+      <p id="room-semantic-status" class="hint room-semantic-status"></p>
+      <div id="room-semantic-legend" class="room-semantic-legend" aria-label="房间语义颜色图例"></div>
       <div class="room-memory-body">
         <div class="room-map-container">
           <svg id="room-map" aria-label="房间范围、轨迹、房间节点与门口连接图" role="group"></svg>

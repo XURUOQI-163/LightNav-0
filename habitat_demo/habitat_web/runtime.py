@@ -3,9 +3,11 @@
 import asyncio
 import contextlib
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 
 from .clients import ModelClient
 from .control import command_for_path
+from .waypoint_overlay import project_waypoints
 
 
 class Runtime:
@@ -39,6 +41,8 @@ class Runtime:
         self.jpeg = None
         self.view_jpeg = None
         self.pointing = None
+        self.waypoint_overlay = None
+        self.camera_calibration = None
         self.state = dict(
             status="loading",
             stop_reason=None,
@@ -85,9 +89,11 @@ class Runtime:
 
     def _publish(self, observation, preserve_view=False):
         self.jpeg = observation["jpeg"]
+        self.camera_calibration = deepcopy(observation.get("depth_camera"))
         if not preserve_view:
             self.view_jpeg = self.jpeg
             self.pointing = None
+            self.waypoint_overlay = None
         self.state.update({k: observation[k] for k in ("pose", "sim_time", "collided")})
         self.state["frame_id"] += 1
         if self.room_memory is not None:
@@ -108,6 +114,7 @@ class Runtime:
             if self.task is not None and not self.task.done():
                 raise ValueError("任务正在运行，请先停止")
             self.view_jpeg, self.pointing = self.jpeg, None
+            self.waypoint_overlay = None
             if self.room_memory is not None:
                 self.room_memory.observe_camera(self.view_jpeg, self.state["sim_time"])
             self.state["frame_id"] += 1
@@ -130,11 +137,14 @@ class Runtime:
                 while self.max_steps == 0 or self.state["step"] < self.max_steps:
                     captured_jpeg = self.jpeg
                     captured_time = self.state["sim_time"]
+                    captured_camera = deepcopy(self.camera_calibration)
+                    captured_pose = deepcopy(self.state['pose'])
                     prediction = await client.predict(captured_jpeg, instruction)
                     self.view_jpeg = captured_jpeg
                     if self.room_memory is not None:
                         self.room_memory.observe_camera(captured_jpeg, captured_time)
                     self.pointing = prediction.pointing if backend == "lightnav" else None
+                    self.waypoint_overlay = project_waypoints(prediction.waypoints, captured_camera)
                     self.state["frame_id"] += 1
                     self.state.update(
                         waypoints=prediction.waypoints,
@@ -147,15 +157,29 @@ class Runtime:
                     if not prediction.waypoints:
                         self.state["stop_reason"] = "empty_path"
                         break
+                    path = await self.prepare_path(prediction.waypoints, captured_pose)
+                    if not path:
+                        if await self.recover_blocked():
+                            continue  # Request new waypoints from the new camera pose.
+                        self.state['stop_reason'] = self.state.get('navigation_reason', 'blocked_path')
+                        break
                     linear, angular = command_for_path(
-                        prediction.waypoints, self.dt, self.max_linear, self.max_angular
+                        path, self.dt, self.max_linear, self.max_angular
                     )
+                    linear, angular = await self.filter_command(linear, angular, self.dt)
                     if linear == 0 and angular == 0:
-                        self.state["stop_reason"] = "zero_command"
+                        if await self.recover_blocked():
+                            continue
+                        self.state["stop_reason"] = self.state.get('navigation_reason') or "zero_command"
                         break
                     observation = await self._sim_call(self.scene.step, linear, angular, self.dt)
-                    self._publish(observation, preserve_view=self.pointing is not None)
+                    self._publish(observation, preserve_view=(
+                        self.pointing is not None or self.waypoint_overlay is not None
+                    ))
                     self.state["step"] += 1
+                    if not await self.check_motion_result(observation, linear):
+                        self.state['stop_reason'] = self.state.get('navigation_reason') or 'motion_blocked'
+                        break
                 else:
                     self.state["stop_reason"] = "step_limit"
             self.state["status"] = "stopped"
@@ -167,6 +191,21 @@ class Runtime:
             self.state.update(
                 status="error", stop_reason="error", error=f"{type(exc).__name__}: {exc}"
             )
+
+    async def prepare_path(self, waypoints, capture_pose):
+        """Optional adapter hook; default navigation remains unchanged."""
+        return waypoints
+
+    async def filter_command(self, linear, angular, duration, *, manual=False):
+        return linear, angular
+
+    async def recover_blocked(self):
+        """Optional simulator recovery; Habitat retains its previous stop behaviour."""
+        return False
+
+    async def check_motion_result(self, observation, linear):
+        """Optional adapter handling of physical stalls; default keeps existing behaviour."""
+        return True
 
     async def _stop(self):
         if self.state["status"] == "running":

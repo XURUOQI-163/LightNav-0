@@ -146,35 +146,14 @@ class StructuralMapBuilder:
             self.status = "capacity_reached"
             return False
         self.last_update = frame.timestamp
-        rows = np.linspace(0, camera.height - 1, min(c.sample_rows, camera.height), dtype=int)
-        cols = np.linspace(0, camera.width - 1, min(c.sample_columns, camera.width), dtype=int)
-        u, v = np.meshgrid(cols, rows)
-        z = depth[np.ix_(rows, cols)].astype(float)
-        valid = np.isfinite(z) & (z >= c.depth_min) & (z < c.depth_max)
-        z = np.where(valid, z, 0)
-        rays = np.stack(
-            ((u - camera.cx) / camera.fx, (v - camera.cy) / camera.fy, np.ones_like(u)), -1
-        )
-        points = (rays * z[..., None]) @ transform[:3, :3].T + transform[:3, 3]
-        valid &= (points[..., 2] >= c.height_min) & (points[..., 2] <= c.height_max)
+        _, points, valid, rotation, translation, origin_xy, endpoints, good = self.project_columns(frame)
         if not valid.any():
             self.status = "insufficient_depth"
             return False
-        co, si = math.cos(frame.pose.yaw), math.sin(frame.pose.yaw)
-        rotation = np.array([[co, -si], [si, co]])
-        translation = np.array([frame.pose.x, frame.pose.y])
-        origin_xy = transform[:2, 3] @ rotation.T + translation
-        xy = points[..., :2] @ rotation.T + translation
-        # Farthest actually measured ray per image column covers horizontal
-        # membership above low furniture. It never clears beyond that ray's hit.
-        ranges = np.linalg.norm(xy - origin_xy, axis=-1)
-        choices = np.argmax(np.where(valid, ranges, -1), axis=0)
-        endpoints = xy[choices, np.arange(len(cols))]
-        good = valid.any(axis=0)
         mask = Image.new("L", (n, n))
         draw = ImageDraw.Draw(mask)
         start = self.cell(*origin_xy)
-        for i in range(len(cols) - 1):
+        for i in range(len(endpoints) - 1):
             if not (good[i] and good[i + 1]):
                 continue
             a, b = endpoints[i] - origin_xy, endpoints[i + 1] - origin_xy
@@ -193,6 +172,39 @@ class StructuralMapBuilder:
         self.revision += 1
         self.status = "capacity_reached" if self.clipped else "ready"
         return True
+
+    def project_columns(self, frame):
+        """Pure per-frame farthest rays shared by structure and semantic projection.
+
+        Uses structural depth/height validity and the identical row/column samples.
+        Does not update coverage, timestamps, walls, or room ownership.
+        """
+        c, camera = self.config, frame.camera
+        depth = np.asarray(frame.depth)
+        transform = np.asarray(camera.camera_to_robot, dtype=float)
+        rows = np.linspace(0, camera.height - 1, min(c.sample_rows, camera.height), dtype=int)
+        cols = np.linspace(0, camera.width - 1, min(c.sample_columns, camera.width), dtype=int)
+        u, v = np.meshgrid(cols, rows)
+        z = depth[np.ix_(rows, cols)].astype(float)
+        valid = np.isfinite(z) & (z >= c.depth_min) & (z < c.depth_max)
+        z = np.where(valid, z, 0)
+        rays = np.stack(
+            ((u - camera.cx) / camera.fx, (v - camera.cy) / camera.fy, np.ones_like(u)), -1
+        )
+        points = (rays * z[..., None]) @ transform[:3, :3].T + transform[:3, 3]
+        valid &= (points[..., 2] >= c.height_min) & (points[..., 2] <= c.height_max)
+        co, si = math.cos(frame.pose.yaw), math.sin(frame.pose.yaw)
+        rotation = np.array([[co, -si], [si, co]])
+        translation = np.array([frame.pose.x, frame.pose.y])
+        origin_xy = transform[:2, 3] @ rotation.T + translation
+        xy = points[..., :2] @ rotation.T + translation
+        # Farthest actually measured ray per image column covers horizontal
+        # membership above low furniture. It never clears beyond that ray's hit.
+        ranges = np.linalg.norm(xy - origin_xy, axis=-1)
+        choices = np.argmax(np.where(valid, ranges, -1), axis=0)
+        endpoints = xy[choices, np.arange(len(cols))]
+        good = valid.any(axis=0)
+        return cols, points, valid, rotation, translation, origin_xy, endpoints, good
 
     def _walls(self, points, rotation, translation):
         c = self.config
