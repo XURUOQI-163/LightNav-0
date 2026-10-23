@@ -22,7 +22,7 @@
 | `--room-memory` | 关闭 | 开启同步前向 RGB-D + GT pose 的被动房间记忆与 2D 页面 |
 | `--room-memory-config` | 内置默认 | JSON 文件，示例 `room_memory/config/default.json`，配置 memory/geometry/semantic/doorway/regions |
 | `--room-memory-output` | runs/room-memory | 每个仿真回合的 graph.json、structure.npz、采样 trajectory.jsonl 和每房代表图 |
-| `--room-semantic-backend` | 按 JSON，内置为 places365 | `clip` / `places365`，选择房间识别器；需要同时启用 `--room-memory` |
+| `--room-semantic-backend` | 按 JSON，default.json 为 clip | `clip` / `groundingdino` / `places365`，选择房间识别器；需要同时启用 `--room-memory` |
 
 GET `/api/state` 返回状态和最近预测；`latency_ms` 是图像请求往返，`model_latency_ms` 是模型服务报告的推理时间，页面展示后者。GET `/api/camera.jpg` 只读取最新 JPEG。POST `/api/start` 接收 `{backend:"lightnav"或"omnivla", instruction:"..."}`；`/api/stop`、`/api/reset` 接收 `{}`。显示和轮询不会驱动环境。`stop_reason` 区分 `model_stop`（模型停止）、`empty_path`（无路径）、`zero_command`（零速度）、`step_limit`（显式步数上限）、`user_stop`（手动停止）和 `error`；开始/重置时清空。停止不等于目标已找到。
 
@@ -88,13 +88,11 @@ cd ~/projects/LightNav-0/habitat_demo
 
 该命令只输出 RGB 检测框，不代表已经通过深度通行验证。权重/缓存缺失不会自动下载、装包或替换模型。准备过程与环境说明见 [room_memory/VISUAL_PORTALS.md](room_memory/VISUAL_PORTALS.md)。
 
-语义默认本地 Places365，无需 API key。房间节点保留多视图归纳：最多 5 个不同视角，至少 3 帧时分类，离开或停止时允许不足 3 帧，每次访问最多一次。另有当前画面的实时单帧识别，在首次观测和后续导航新帧到达时运行；相机没有新帧时不重复推理。两者共用同一个常驻模型，导航不等待分类结果。停止导航保留图，重置场景新建 session，旧图保留在输出目录。
+语义默认本地 CLIP，也可选择 Grounding DINO-T 或 Places365，无需 API key。房间节点保留多视图归纳：最多 5 个不同视角，至少 3 帧时分类，离开或停止时允许不足 3 帧，每次访问最多一次。另有当前画面的实时单帧识别，在首次观测和后续导航新帧到达时运行；相机没有新帧时不重复推理。两者共用同一个常驻模型，导航不等待分类结果。停止导航保留图，重置场景新建 session，旧图保留在输出目录。
 
 ### Places365 语义配置
 
-在原启动命令中加 `--room-semantic-backend clip` 使用 CLIP，改成 `places365` 切回原模型。切换后重启 Habitat 并刷新页面，导航模型服务无需重启。一次只运行所选语义后端，不混合两个模型的结果。
-
-CLI 后端与 JSON 中 `semantic.backend` 不同时，采用所选后端的默认权重、Python、设备及推理参数，只继承 `live_enabled` / `live_interval`；其余 memory/geometry/doorway/regions 配置照常保留。这可避免将 Places365 的 Python 或类别映射误传给 CLIP。要定制 CLIP 参数，请使用下面的 CLIP 配置。
+默认 JSON 使用 CLIP；`--room-semantic-backend groundingdino` 或 `places365` 切换后端。模型路径、类别和阈值在 `semantic_backends.<后端>` 下分开配置，投影在 `semantic_projection.backends.<后端>` 下配置。兼容旧 semantic 参数写法，详见 [并列后端](room_memory/BACKENDS.md)。
 
 `room_memory/config/default.json` 的 `semantic` 字段：
 
@@ -123,38 +121,35 @@ LightNav 显示 APOS/OPOS 时，网页保留该预测的输入图像；实时识
 
 旧千问适配器仍可选：将整个 `semantic` 对象替换为 `{"backend":"qwen","model":"qwen-vl-plus","base_url":"https://dashscope.aliyuncs.com/compatible-mode/v1","timeout":20.0}`，并在启动终端设置 `DASHSCOPE_API_KEY`。Places365 默认配置不读取或要求该密钥。
 
-### CLIP 语义配置与对比
+### CLIP 配置
 
-`room_memory/config/clip.json` 提供可编辑的 CLIP `semantic` 对象，其余模块使用已有默认配置。也可把其中整个 `semantic` 对象复制到自己的完整配置文件中。直接把 Places365 对象里的 `backend` 改成 clip 会留下不适用的键，请使用启动参数切换或替换整个对象。
+`--room-semantic-backend clip` 为主配置默认选项。`semantic_backends.clip` 下设置 `labels`、`templates`、`model_path`、`python_executable`、`device`（cpu）和 `num_threads`（2）。`semantic_projection.backends.clip` 默认 `view_mode=full`，保留可选 `left_right`；Top1 < 0.35 或 Top3 分差 < 0.10 跳过投影，已有证据保留。参数名为 `filter_low_confidence`、`low_top1_threshold`、`top3_spread_threshold`。界面恢复原始实时图及当前画面的 CLIP 分类。
 
-| 字段 | 默认 | 说明 |
+### Grounding DINO-T 配置
+
+`--room-semantic-backend groundingdino` 选择独立环境中的官方 Swin-T OGC；默认 JSON 为 CLIP，传此参数切换到 DINO。第一张原始图显示完成检测的源帧及其框/分数，地图投影用同一帧 RGB-D 和位姿。未检测到候选时不强制分类。
+
+| semantic_backends.groundingdino 字段 | 默认 | 说明 |
 | --- | --- | --- |
-| `model_path` | `~/.cache/clip/ViT-B-32.pt` | 已有 OpenAI CLIP ViT-B/32 本地权重；缺失时明确报错，不在导航期间下载 |
-| `python_executable` | `~/.conda/envs/omnivla/bin/python` | 已有 CLIP 环境；Habitat 不导入 torch，不升级任何环境 |
-| `device` / `num_threads` | `cpu` / `2` | 不占导航模型显存；可显式配置 CUDA |
-| `timeout` | `60.0` | 单次子进程请求超时，首次包含权重和文本编码加载 |
-| `live_enabled` / `live_interval` | `true` / `1.0` | 实时单帧识别与最小启动间隔，和 Places365 一致 |
-| `labels` | 下面 10 类 | 节点使用原样字符串，含空格，`room_id` 不受类别影响 |
-| `templates` | 配置中的 3 个室内场景模板 | 每个模板用一个 `{}` 替换类别名；文本特征在启动时编码、平均并归一化 |
+| `python_executable` | `~/.conda/envs/groundingdino/bin/python` | 独立 GPU 子进程，主仿真环境不安装 torch |
+| `model_path` | 同级 GroundingDINO/weights/groundingdino_swint_ogc.pth | 官方 Swin-T 权重 |
+| `config_path` | 同级 GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py | 官方配置 |
+| `bert_path` | 同级 GroundingDINO/weights/bert-base-uncased | 离线文本编码器 |
+| `device` / `num_threads` | `cuda:0` / `2` | CUDA 编号遵守当前进程 CUDA_VISIBLE_DEVICES |
+| `box_threshold` | `0.25` | 候选短语 token sigmoid 均分阈值 |
+| `timeout` | `120` | 子进程请求秒数，首次含加载 |
+| `labels` | 用户保留的 6 类 | bedroom、living room、bathroom、kitchen、dining room、corridor |
 
-固定候选为 `bedroom`、`living room`、`bathroom`、`kitchen`、`dining room`、`office room`、`gym`、`lounge`、`laundry room`、`corridor`。每张图计算图文匹配，10 类内 softmax；房间多视图平均各帧概率后取 Top-1，并选对获胜类别支持最高的代表图。不按阈值转 unknown；场景不在这 10 类时仍会选最接近的一类，因此高分不等于真实类别一定在候选集合内。
+检测间隔使用 `semantic_projection.interval=1.5`；`semantic_backends.<后端>.live_enabled/live_interval` 用于 CLIP / Places365 的单图分类通道。DINO 的检测与地图共用一个同步 RGB-D 通道。`semantic_projection.enabled=false` 可关闭投影但保留框；关闭整个功能需移除 `--room-memory`。更多输出接口、坐标及融合说明见 [语义投影](room_memory/SEMANTIC_PROJECTION.md)。
 
-页面标题明确显示 CLIP 或 Places365。`graph.json` 与导出 JSON 的 `semantic_metadata` 保存后端信息；CLIP 额外记录权重路径、类别、模板和聚合方式，便于区分实验。实时识别仍复用原有最新帧队列与显示图像同步逻辑，不更改导航或房间转换判断。
-
-离线用完全相同的 JPEG 对比：
+独立测试（无需启动仿真）：
 
 ```bash
-conda activate omnivla-habitat
 cd ~/projects/LightNav-0/habitat_demo
-python -m room_memory.compare_semantics /path/to/room-view.jpg \
-  --output runs/semantic-comparison/room-view.json
+~/.conda/envs/groundingdino/bin/python -m room_memory.groundingdino_recognizer /path/to/image.jpg --output runs/detection.json --annotated runs/detection.jpg
 ```
 
-可提供 1–5 张同一个房间的图像作为多视图，不同房间分开运行；可加 `--config` 指定当前配置。工具串行调用两个已有环境，保存图像 SHA256、分类分布、代表帧、模型配置、首轮耗时和一次热模型请求耗时，退出时清理子进程。计时包括请求传输与图像预处理，不是纯神经网络耗时。
-
-CLIP 是固定 10 类匹配，Places365 保留 365 类原始分类，二者的分数不能当作可比准确率。建议用相同场景、相同保存帧并人工标注类别，比较正确率、lounge/living room 等混淆和跨视角稳定性；在线跑两次导航不保证获得相同视角。当前示例报告只是一帧联调，不能用于宣称哪个模型更准确。
-
-依据：[OpenAI CLIP](https://github.com/openai/CLIP) 支持文本候选匹配；[Places365](https://github.com/CSAILVision/places365) 提供场景分类模型。
+`compare_semantics --backends clip groundingdino` 可对比两种后端（默认组合）；也支持 `--backends clip places365`。两者分数不代表可比较的正确率。CLIP 与 DINO 代码及配置并列保留。重启仿真终端并强制刷新网页，导航模型服务无需重启。
 
 ## 纯 OmniVLA：`python -m habitat_web.omnivla_service`
 

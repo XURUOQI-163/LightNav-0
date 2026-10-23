@@ -137,6 +137,9 @@ class IsaacRuntime(Runtime):
         self.observation_frame_id += 1
         self._publish_preview(observation)
         self.state.update(observation.get("timing", {}))
+        for key in ("applied_command", "body_attitude", "chassis_pose"):
+            if key in observation:
+                self.state[key] = observation[key]
         super()._publish(observation, preserve_view=preserve_view)
 
     async def _sim_call(self, fn, *args):

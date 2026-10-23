@@ -8,10 +8,8 @@ import numpy as np
 import pytest
 
 pytest.importorskip("pxr.Usd")
-from pxr import Gf, Usd, UsdGeom, UsdPhysics
-
 from isaac_web.carter_resize import resize_carter
-
+from pxr import Gf, Usd, UsdGeom, UsdPhysics
 
 ASSET = Path(os.environ.get("CARTER_USD", "/data/disk1/xrq/datasets/omninavbench/Assets/robots/Carter/carter_v1.usd"))
 
@@ -94,3 +92,28 @@ def test_unknown_asset_fails_before_partial_resize():
     with pytest.raises(ValueError, match="Carter"):
         resize_carter(root, .5)
     assert stage.GetSessionLayer().ExportToString() == before
+
+
+@pytest.mark.parametrize('profile,scale', [('original', 1.), ('half_xy', .5)])
+def test_stability_overrides_are_finite_local_and_preserve_geometry(carter, profile, scale):
+    from isaac_web.robot_profiles import apply_robot_profile
+    from isaac_web.stability import configure_carter_dynamics
+    stage, root = carter
+    cfg = apply_robot_profile({}, profile)
+    resize_carter(root, scale)
+    before = visual_size(root)
+    disk_hash = hashlib.sha256(ASSET.read_bytes()).hexdigest()
+    configure_carter_dynamics(root, cfg['stability'])
+    np.testing.assert_allclose(visual_size(root), before)
+    assert hashlib.sha256(ASSET.read_bytes()).hexdigest() == disk_hash
+    assert root.GetAttribute('physxArticulation:solverVelocityIterationCount').Get() == 4
+    for p in Usd.PrimRange(root):
+        if p.GetName() in ('left_wheel', 'right_wheel'):
+            drive = UsdPhysics.DriveAPI(p, 'angular')
+            assert drive.GetMaxForceAttr().Get() == cfg['stability']['wheel_max_torque']
+            assert drive.GetDampingAttr().Get() == cfg['stability']['wheel_damping']
+        if p.GetName() in ('chassis_link', 'com_offset'):
+            com = UsdPhysics.MassAPI(p).GetCenterOfMassAttr().Get()
+            assert com[2] == pytest.approx(-cfg['stability']['com_lowering'])
+    with pytest.raises(ValueError, match='already applied'):
+        configure_carter_dynamics(root, cfg['stability'])

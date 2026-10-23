@@ -13,6 +13,7 @@ from .bridge import IsaacScene
 from .geometry import IsaacGTPoseSource
 from .robot_profiles import PROFILES, apply_robot_profile, room_geometry_for_robot
 from .runtime import IsaacRuntime
+from .stability import StabilityConfig
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -57,11 +58,12 @@ def parse_args(argv=None):
     p.add_argument('--local-map-radius', type=float, help='Override circular window radius in metres (default 5)')
     p.add_argument("--room-memory-config", type=Path, default=ROOT / "config/room_memory.json")
     p.add_argument("--room-memory-output", type=Path, default=ROOT / "runs/room-memory")
-    p.add_argument("--room-semantic-backend", choices=("clip", "places365"))
+    p.add_argument("--room-semantic-backend", choices=("clip", "groundingdino", "places365"))
     a = p.parse_args(argv)
     try:
         cfg = json.loads(a.config.read_text())
         cfg = apply_robot_profile(cfg, a.robot_profile)
+        stability = StabilityConfig(**cfg["stability"])
         if a.local_navigation:
             from dataclasses import asdict
 
@@ -148,6 +150,12 @@ def parse_args(argv=None):
                 raise ValueError("invalid model URL scheme or hostname")
     except (OSError, KeyError, TypeError, ValueError) as exc:
         p.error(str(exc))
+    requested = (a.max_linear, a.max_angular)
+    a.max_linear = min(a.max_linear, stability.max_linear)
+    a.max_angular = min(a.max_angular, stability.max_angular)
+    if requested != (a.max_linear, a.max_angular):
+        print(f"[isaac-web] {cfg['robot_profile']} dynamics limits: requested v/w={requested}, "
+              f"effective v/w={(a.max_linear, a.max_angular)}", flush=True)
     return a, cfg
 
 
@@ -164,6 +172,7 @@ def main():
         from room_memory.config import (
             load_config,
             load_doorway_config,
+            load_partition_config,
             load_projection_config,
             load_region_config,
         )
@@ -180,7 +189,8 @@ def main():
             pose_source=IsaacGTPoseSource(),
             doorway_config=doorway_cfg,
             region_config=load_region_config(a.room_memory_config),
-            projection_config=load_projection_config(a.room_memory_config),
+            projection_config=load_projection_config(a.room_memory_config, semantic_backend=a.room_semantic_backend),
+            partition_config=load_partition_config(a.room_memory_config),
         )
     runtime = IsaacRuntime(
         lambda: IsaacScene(
@@ -196,6 +206,7 @@ def main():
         path_position_tolerance=a.path_position_tolerance,
         path_yaw_tolerance=math.radians(a.path_yaw_tolerance_deg), path_timeout=a.path_timeout,
     )
+    runtime.state["stability"] = cfg["stability"]
     runtime.state["robot_geometry"] = {key: cfg[key] for key in (
         "robot_profile", "footprint", "robot_width", "robot_height",
         "wheel_radius", "wheel_base", "camera_offset",

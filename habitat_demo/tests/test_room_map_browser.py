@@ -225,12 +225,20 @@ async def test_room_map_browser():
                 "document.querySelector('#room-detail-semantic').textContent.includes('暂无明确类别')"
             )
             assert "重启" not in await page.locator("#room-detail-semantic").inner_text()
-            next_snapshot["semantic_backend"] = "clip"
+            next_snapshot["semantic_backend"] = "groundingdino"
             next_snapshot["rooms"][0]["room_type"] = "palace"
+            await page.wait_for_function(
+                "document.querySelector('#room-live-title').textContent.includes('Grounding DINO-T')"
+            )
+            assert "Grounding DINO-T" in await page.locator("#room-memory-status").inner_text()
+            assert "Grounding DINO-T" in await page.locator("#room-semantic-provider").inner_text()
+            next_snapshot["semantic_backend"] = "clip"
             await page.wait_for_function(
                 "document.querySelector('#room-live-title').textContent.includes('CLIP')"
             )
             assert "CLIP" in await page.locator("#room-memory-status").inner_text()
+            assert "CLIP" in await page.locator("#room-semantic-provider").inner_text()
+
 
             next_snapshot["live_semantic"].update(status="processing", processing_seconds=2.1)
             await page.wait_for_function(

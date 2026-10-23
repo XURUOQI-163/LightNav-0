@@ -2,12 +2,12 @@
 
 Inspired by ApexNav/VLFM's visibility masks and FOV weighting. This independently
 implemented layer uses structural farthest-depth rays and accumulated multiclass means;
-CLIP scores are relative scene evidence, not per-pixel semantic segmentation.
+Detector scores are region evidence, not per-pixel semantic segmentation.
 """
 import base64
 import io
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Optional
 
 import numpy as np
@@ -26,7 +26,7 @@ ROOM_COLORS = {
 @dataclass
 class ProjectionConfig:
     enabled: bool = True
-    view_mode: str = 'full'  # Optional retained split mode: left_right.
+    view_mode: str = 'full'
     interval: float = 1.5  # wall seconds; pending frames are replaceable
     max_range: Optional[float] = None  # Legacy option accepted but no longer limits projection.
     filter_low_confidence: bool = True
@@ -43,8 +43,8 @@ class ProjectionConfig:
     max_weight: float = 20.0
 
     def __post_init__(self):
-        if self.view_mode not in ('full', 'left_right'):
-            raise ValueError('semantic projection view_mode must be full or left_right')
+        if self.view_mode not in ('full', 'left_right', 'detections'):
+            raise ValueError('semantic projection view_mode must be full, left_right or detections')
         if not isinstance(self.enabled, bool) or not isinstance(self.filter_low_confidence, bool):
             raise ValueError('semantic projection enabled/filter flags must be boolean')
         if self.max_range is not None and (isinstance(self.max_range, bool)
@@ -92,9 +92,9 @@ class SemanticEvidenceMap:
         self.palette = [ROOM_COLORS.get(label, '#94a3b8') for label in labels]
         self._snapshot = None
 
-    def project(self, frame):
-        """Return frozen world cell patches and square RGB crops from ONE RGB-D frame."""
-        c, s, cam = self.config, self.structure, frame.camera
+    def project(self, frame, crops=None, structure=None):
+        """Return world cell patches from capture-aligned detection boxes and depth."""
+        c, s, cam = self.config, structure or self.structure, frame.camera
         if not c.enabled or s.origin is None or not s.config.enabled:
             return []
         if frame.elevation is not None and s.floor_height is not None:
@@ -110,18 +110,26 @@ class SemanticEvidenceMap:
         image = Image.open(io.BytesIO(frame.rgb)).convert('RGB')
         if image.size != (cam.width, cam.height):
             raise ValueError('semantic RGB and depth must be pixel aligned')
-        columns, _, _, _, _, origin, far_endpoints, far_valid = s.project_columns(frame)
         walls = s.walls
         n = s.config.grid_size
         patches = []
-        # Default full-frame recognition; retain the previous two-view design as
-        # an explicit option. Letterboxing preserves the entire source FOV.
-        view_count = 2 if c.view_mode == 'left_right' else 1
-        for view in range(view_count):
-            left = view * cam.width // view_count
-            right = (view + 1) * cam.width // view_count
-            top, bottom = 0, cam.height
+        # The detector supplies original-pixel boxes. Freeze geometry before
+        # inference, and only use depth within each bbox, including its rows.
+        classify_crops = crops is None
+        if crops is None:
+            count = 2 if c.view_mode == 'left_right' else 1
+            crops = [(i * cam.width // count, 0, (i + 1) * cam.width // count, cam.height)
+                     for i in range(count)]
+        for view, bounds in enumerate(crops):
+            left, top, right, bottom = bounds
+            if not (0 <= left < right <= cam.width and 0 <= top < bottom <= cam.height):
+                raise ValueError('invalid original-pixel region crop')
             crop = (left, top, right, bottom)
+            masked = np.full(depth.shape, np.nan, dtype=np.float32)
+            y0, y1 = int(math.floor(top)), int(math.ceil(bottom))
+            x0, x1 = int(math.floor(left)), int(math.ceil(right))
+            masked[y0:y1, x0:x1] = depth[y0:y1, x0:x1]
+            columns, _, _, _, _, origin, far_endpoints, far_valid = s.project_columns(replace(frame, depth=masked))
             selected = (columns >= left) & (columns < right)
             cols = columns[selected]
             good = far_valid[selected]
@@ -170,10 +178,15 @@ class SemanticEvidenceMap:
                         cells[index] = max(cells.get(index, 0), weight)
             if not cells:
                 continue
-            jpeg = io.BytesIO()
-            side = max(right - left, bottom - top)
-            ImageOps.pad(image.crop(crop), (side, side), color=(114, 114, 114)).save(jpeg, 'JPEG', quality=90)
-            patches.append(ViewPatch(SemanticFrame(f'projection-{frame.timestamp}-{view}', jpeg.getvalue()),
+            rgb = frame.rgb
+            if classify_crops:
+                # CLIP's square input must preserve all source pixels/FOV instead
+                # of letting the model's centre crop silently discard the edges.
+                jpeg = io.BytesIO()
+                side = int(max(right - left, bottom - top))
+                ImageOps.pad(image.crop(crop), (side, side), color=(114, 114, 114)).save(jpeg, 'JPEG', quality=90)
+                rgb = jpeg.getvalue()
+            patches.append(ViewPatch(SemanticFrame(f'projection-{frame.timestamp}-{view}', rgb),
                                      np.array(list(cells), np.int64), np.array(list(cells.values()), np.float32), crop))
         return patches
 

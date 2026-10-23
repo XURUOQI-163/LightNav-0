@@ -74,8 +74,8 @@ def test_invalid_depth_never_paints_unknown_area(depth):
 
 
 def test_view_sectors_can_have_different_labels_and_persist(tmp_path):
-    _, m = setup_map(view_mode='left_right')
-    patches = m.project(rgbd())
+    _, m = setup_map()
+    patches = m.project(rgbd(), crops=[(0, 0, 40, 60), (40, 0, 80, 60)])
     assert len(patches) == 2
     assert [p.crop for p in patches] == [(0, 0, 40, 60), (40, 0, 80, 60)]
     m.fuse(0, [(p, {'kitchen': float(i != 1), 'bedroom': float(i == 1)})
@@ -95,9 +95,8 @@ def test_view_sectors_can_have_different_labels_and_persist(tmp_path):
 async def test_service_binds_delayed_result_to_capture_and_reset_discards_it(tmp_path, monkeypatch):
     import asyncio
 
-    from room_memory import clip_recognizer
+    from room_memory import groundingdino_recognizer
     from room_memory.config import MemoryConfig
-    from room_memory.semantics import RoomSemanticResult
     from room_memory.service import RoomMemoryService
     from test_room_service import observation
 
@@ -106,15 +105,16 @@ async def test_service_binds_delayed_result_to_capture_and_reset_discards_it(tmp
             self.started, self.release = asyncio.Event(), asyncio.Event()
 
         def metadata(self):
-            return {'labels': ['kitchen', 'bedroom'], 'backend': 'clip'}
+            return {'labels': ['kitchen', 'bedroom'], 'backend': 'groundingdino'}
 
-        async def classify(self, frames):
+        async def detect(self, frame):
             self.started.set()
             await self.release.wait()
-            return RoomSemanticResult('kitchen', {'kitchen': 1., 'bedroom': 0.}, 1., frames[0].frame_id)
+            return dict(frame_id=frame.frame_id, detections=[dict(bbox_xyxy=[0, 0, 64, 48],
+                center_pixel=[32, 24], room_type='kitchen', score=1.)])
 
-    monkeypatch.setattr(clip_recognizer, 'CLIPRecognizer', Classifier)
-    service = RoomMemoryService(MemoryConfig(), {}, {'backend': 'clip', 'live_enabled': False},
+    monkeypatch.setattr(groundingdino_recognizer, 'GroundingDINORecognizer', Classifier)
+    service = RoomMemoryService(MemoryConfig(), {}, {'backend': 'groundingdino', 'live_enabled': False},
                                 tmp_path, region_config={'grid_size': 256},
                                 projection_config={'interval': .1})
     await service.start()
@@ -133,7 +133,7 @@ async def test_service_binds_delayed_result_to_capture_and_reset_discards_it(tmp
         assert evidence(evidence_map, 1., 0)[1] > 0
         assert evidence(evidence_map, 4., 3.)[1] == 0
         assert service.cache['semantic_map']['source_timestamp'] == 0
-        assert service.cache['semantic_map']['view_mode'] == 'full'
+        assert service.cache['semantic_map']['view_mode'] == 'detections'
         assert len(service.cache['semantic_map']['views']) == 1
         assert service.cache['semantic_map']['source_pose'] == {'x': 0., 'y': 0., 'yaw': 0.}
         assert service.cache['portals'] == []
@@ -174,7 +174,7 @@ def test_projection_has_no_three_metre_cap_and_uses_long_term_coverage():
 
 
 def test_low_close_top3_is_rejected_before_fusion_without_erasing_old_evidence():
-    from room_memory.clip_recognizer import DEFAULT_LABELS
+    from room_memory.groundingdino_recognizer import DEFAULT_LABELS
 
     s, _ = setup_map()
     m = SemanticEvidenceMap(s, DEFAULT_LABELS)
@@ -200,7 +200,7 @@ def test_low_close_top3_is_rejected_before_fusion_without_erasing_old_evidence()
     [.36, .35, .29, 0, 0, 0, 0, 0],  # close top3, but not all low
 ])
 def test_filter_rejects_either_low_or_close_without_erasing_history(scores):
-    from room_memory.clip_recognizer import DEFAULT_LABELS
+    from room_memory.groundingdino_recognizer import DEFAULT_LABELS
 
     s, _ = setup_map()
     m = SemanticEvidenceMap(s, DEFAULT_LABELS)
@@ -219,11 +219,11 @@ def test_filter_rejects_either_low_or_close_without_erasing_history(scores):
 
 
 def test_filter_is_per_view_not_whole_frame():
-    from room_memory.clip_recognizer import DEFAULT_LABELS
+    from room_memory.groundingdino_recognizer import DEFAULT_LABELS
 
     s, _ = setup_map()
-    m = SemanticEvidenceMap(s, DEFAULT_LABELS, {'view_mode': 'left_right'})
-    left, right = m.project(rgbd())
+    m = SemanticEvidenceMap(s, DEFAULT_LABELS)
+    left, right = m.project(rgbd(), crops=[(0, 0, 40, 60), (40, 0, 80, 60)])
     strong = {label: float(label == 'kitchen') for label in DEFAULT_LABELS}
     weak = dict(zip(DEFAULT_LABELS, [.19, .18, .17, .12, .11, .09, .08, .06]))
     assert m.fuse(0, [(left, strong), (right, weak)])
@@ -233,7 +233,7 @@ def test_filter_is_per_view_not_whole_frame():
 
 
 def test_low_confidence_filter_can_be_disabled_and_legacy_radius_does_not_limit():
-    from room_memory.clip_recognizer import DEFAULT_LABELS
+    from room_memory.groundingdino_recognizer import DEFAULT_LABELS
 
     s, _ = setup_map()
     m = SemanticEvidenceMap(s, DEFAULT_LABELS, {'filter_low_confidence': False, 'max_range': 3.})
@@ -256,7 +256,7 @@ def test_reject_invalid_filter_configuration(options):
 
 def test_semantics_reaches_far_structure_above_near_furniture():
     depth = np.full((60, 80), np.nan, np.float32)
-    depth[20:26] = 4.0  # far wall seen above a nearer low obstacle
+    depth[18:26] = 4.0  # 0.7 m continuous far wall above a nearer low obstacle
     depth[27:33] = 1.0
     frame = rgbd(depth)
     s = builder()
@@ -271,9 +271,9 @@ def test_semantics_reaches_far_structure_above_near_furniture():
 
 
 def test_semantics_uses_structural_height_depth_and_sampling_options():
-    # Only a high wall sample, missed by the old semantic height limit/row grid.
+    # A supported high wall band, missed by the old semantic height limit.
     depth = np.full((60, 80), np.nan, np.float32)
-    depth[9] = 4.0
+    depth[7:15] = 4.0
     frame = rgbd(depth)
     s = builder(height_max=2.8, sample_rows=60, depth_max=8.)
     s.observe(frame)

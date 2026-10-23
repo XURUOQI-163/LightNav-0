@@ -44,7 +44,7 @@ cd /data/disk1/xrq/projects/LightNav-0/isaac_demo
 - RGB/深度同一相机，`depth_camera` 提供实际 K 和 optical→robot 外参。
 - 物理步 `1/60s`，每条模型路径执行默认 `1/3s`，等待推理/浏览器刷新期间不推进物理时间。
 - 使用两轮速度目标驱动 PhysX，不把路径直接写成机器人瞬移；仅 reset 设置出生位姿。
-- Room Memory 是被动观察者，不决定运动。定位用 IsaacGTPoseSource，保留 CLIP/Places365 选择。
+- Room Memory 是被动观察者，不决定运动。定位用 IsaacGTPoseSource，保留 CLIP/Grounding DINO/Places365 选择，默认配置为 `config/room_memory.json`，详见 [后端配置](../habitat_demo/room_memory/BACKENDS.md)。
 - 此版本使用配置中的单层 `floor_z`；跨楼层时需要另行处理楼层归属。不是 SLAM 或 D455 噪声仿真。
 
 ## HTTP
@@ -114,7 +114,7 @@ with np.load('/tmp/carter-observation.npz', allow_pickle=False) as obs:
 | `--local-map-radius` | 覆盖圆形窗口半径，默认 5 m；需同时启用 `--local-navigation` |
 | `--room-memory-config` | `config/room_memory.json` |
 | `--room-memory-output` | `runs/room-memory`，各 session 独立目录 |
-| `--room-semantic-backend` | clip / places365；不传时使用配置（places365） |
+| `--room-semantic-backend` | clip / groundingdino / places365；不传时使用配置（clip） |
 
 JSON 还提供 `floor_z`、`camera_offset`、`wheel_radius`、`wheel_base`、`physics_dt`、`settle_steps`、`render_frames`、`ambient_light`、`materials`。
 
@@ -132,7 +132,7 @@ JSON 还提供 `floor_z`、`camera_offset`、`wheel_radius`、`wheel_base`、`ph
   --local-navigation --local-map-radius 5
 ```
 
-可继续追加 `--room-memory --room-semantic-backend clip`。局部地图与房间记忆独立；不需要启用 CLIP 才能避碰。
+可继续追加 `--room-memory --room-semantic-backend clip`。局部地图与房间记忆独立；不需要启用房间检测 才能避碰。
 模型输入、原始预测和现有跟踪器保留；可选 `--mpc` 切换官方 MPC，`--no-realtime-update` 等待整段完成再请求。页面蓝色编号是模型原始点，绿色线是送往跟踪器的修正路径，可能包含更多点。
 默认使用 `planning_only`：地图仅用于提前纠正预测路径，不再拦截跟踪器速度或根据 collided 标志停止。
 起点已在膨胀区时，保留原预测到第一个可行点的离开段，继续纠正后续路径；找不到修正路径时沿原预测继续，并显示 `fallback`。

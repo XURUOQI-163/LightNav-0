@@ -40,3 +40,28 @@ async def test_http_controls_latest_camera_and_model_selection():
         assert (await client.post("/api/reset", json={})).status == 200
         state = await (await client.get("/api/state")).json()
         assert state["step"] == 0 and state["status"] == "idle"
+
+
+@pytest.mark.asyncio
+async def test_detection_image_is_completed_source_not_live_camera():
+    from types import SimpleNamespace
+
+    runtime = Runtime(lambda: Scene(), {"lightnav": "ws://test"}, client_factory=lambda *a: Pending())
+    async with TestClient(TestServer(create_app(runtime))) as client:
+        assert (await client.get('/api/room-memory/detection.jpg')).status == 503
+        runtime.room_memory = SimpleNamespace(semantic_backend='groundingdino',
+            projection=SimpleNamespace(detection_frame=dict(jpeg=b'captured-and-annotated',
+                frame_id='session-1.0', timestamp=1.0)))
+        try:
+            state = await (await client.get('/api/state')).json()
+            assert state['room_detection_enabled'] is True
+            response = await client.get('/api/room-memory/detection.jpg')
+            assert await response.read() == b'captured-and-annotated'
+            assert response.headers['X-Sim-Time'] == '1.0'
+            assert response.headers['X-Frame-Id'] == 'session-1.0'
+            assert (await client.get('/api/room-memory/detection.jpg?after=session-1.0')).status == 204
+            runtime.room_memory.projection.detection_frame = None
+            assert (await client.get('/api/room-memory/detection.jpg')).status == 503
+        finally:
+            runtime.room_memory = None
+

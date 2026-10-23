@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "lightnav-habitat-web"
 version = "0.1.0"
 requires-python = ">=3.9"
-dependencies = ["aiohttp>=3.9,<4", "numpy", "pillow"]
+dependencies = ["aiohttp>=3.9,<4", "numpy", "pillow", "scipy>=1.8"]
 
 [project.scripts]
 habitat-web = "habitat_web.__main__:main"

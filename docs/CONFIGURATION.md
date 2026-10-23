@@ -193,22 +193,19 @@ For HM3D, pass `--scene-dataset-config` with the matching
 Optional passive room memory is enabled by `--room-memory`, with thresholds and
 local Places365 inference options in `--room-memory-config` and per-session artifacts under
 `--room-memory-output` (default `runs/room-memory`). It does not issue policy actions.
-By default, Habitat automatically launches a persistent CPU inference worker using
-the existing `places365` Python environment; no API key or separate service launch
-is required. Qwen remains an explicitly selected optional backend.
+The shipped room-memory config defaults to CLIP in the omnivla CPU worker; Grounding DINO uses its separate CUDA worker when selected.
+Places365 remains selectable as a persistent CPU worker; neither needs an API key
+or a separate service launch. Qwen remains an explicitly selected optional backend.
 Places365 now retains the raw 365-class Top-1 without a confidence cutoff. The
 camera panel shows a separate live single-frame result (default at most once per
 second), while room nodes retain multiview averaging. `semantic.live_enabled`
 and `semantic.live_interval` control this observer; `live_semantic` in the memory
 API reports timestamps, processing time, counts and errors. Legacy
 `memory.semantic_min_confidence` is accepted but no longer filters labels.
-Use `--room-semantic-backend clip` to select the additional local CLIP ViT-B/32
-observer, or `--room-semantic-backend places365` to retain the original scene
-classifier. CLIP uses the ten configured room names and the existing `omnivla`
-Python environment; only the selected backend runs. Neither option changes the
-navigation policy. See [Habitat configuration](../habitat_demo/CONFIGURATION.md)
-for `room_memory/config/clip.json`, backend override behavior, and the
-`python -m room_memory.compare_semantics` command for comparing identical JPEGs.
+Use `--room-semantic-backend clip` (default), `groundingdino` for the independent CUDA
+Swin-T region detector, or `places365` for the original classifier. Detection
+boxes are tied to their source RGB-D frame; neither backend changes navigation.
+See [Habitat configuration](../habitat_demo/CONFIGURATION.md).
 
 Room memory now enables a separate local YOLOE-26s worker by default. RGB doorway
 proposals require synchronized depth clearance before creating blue unexplored
@@ -240,7 +237,7 @@ Full CLI flags, JSON sensor/physics parameters, model launch environment variabl
 ```bash
 cd isaac_demo
 MODEL_GPU=1 ./start_model.sh lightnav  # separate terminal; or omnivla
-./run.sh --gpu 0 --host 0.0.0.0 --port 8091 --room-memory --room-semantic-backend clip
+./run.sh --gpu 0 --host 0.0.0.0 --port 8091 --room-memory --room-semantic-backend groundingdino
 ```
 
 `--max-steps 0` means unlimited actions but preserves model STOP. `--scene` overrides require
@@ -384,7 +381,7 @@ path correction. Its default `planning_only` mode does not collision-filter velo
 and the existing follower unchanged. `--local-navigation-config PATH` defaults to
 `isaac_demo/config/local_navigation.json`; `--local-map-radius METRES` overrides its
 `window_radius_m` (default **5.0**, allowed 1–10). The window is a robot-centred circle;
-there is no observation TTL. Room Memory and CLIP are independent optional features.
+there is no observation TTL. Room Memory and room detection are independent optional features.
 
 The web panel shows raw/corrected paths and offers trajectory-correction/manual-observation modes.
 `initial_clear_radius_m` is currently 1.5 m in the user-edited JSON (the Python
@@ -453,38 +450,113 @@ budget ends recovery. `/api/state.recovery` exposes direction, scores and budget
 No model-service changes or extra CLI flags are required; restart the Isaac web
 process and hard-refresh the browser. Habitat's default recovery hooks do nothing.
 
-### CLIP room semantic evidence layer (Habitat / Isaac)
+### Selectable CLIP / Grounding DINO semantic evidence (Habitat / Isaac)
 
-With `--room-memory --room-semantic-backend clip`, the existing room-memory
-JSON accepts `semantic_projection`. It is enabled by default and requires
-`regions.enabled=true`. Set `semantic_projection.enabled=false` to disable
-computation; the page's “CLIP 语义投影” checkbox only hides the layer.
-Defaults: `view_mode="full"`, `interval=1.5` wall seconds, no fixed projection radius,
-`max_weight=20`. Projection now shares the long-term structural map’s per-column
-farthest observations and `regions` depth/height/sampling options. Nearby furniture
-does not truncate an otherwise observed far wall. There is no semantic endpoint inset.
-These parameters do not change `--local-map-radius`, MPC or navigation requests.
-Restart the web/simulator process after configuration changes.
+Use `--room-memory --room-semantic-backend groundingdino`. The default room-memory
+JSON defaults to CLIP; the flag selects the isolated `groundingdino` GPU worker. `semantic_backends.groundingdino.box_threshold=0.25`
+filters candidate phrase scores, `semantic_backends.groundingdino.device=cuda:0` selects a visible GPU,
+and `semantic_projection.interval=1.5` controls detection cadence. Only source-frame
+bbox depth directions are projected into captured long-term geometry. No fixed
+projection radius or Portal dependency. Every cell retains multi-class evidence.
+The first image shows the completed detection source image with boxes and scores;
+the third-person and navigation-model views are unaffected.
 
-Each projected sample owns its synchronized RGB-D, timestamp, calibration and
-capture pose. The default full image (letterboxed to square, preserving its complete FOV)
-yields one class distribution per projection sample. Set `view_mode="left_right"` to
-run the retained two-crop implementation instead; it is inactive by default. Angle
-weights use the full-view centre in full mode and each crop centre in split mode;
-only observed depth-visible world cells receive weighted evidence. No Portal is
-required. Existing Room ID colors are replaced by a neutral geometry background
-while this overlay is shown. The room/portal graph remains separately visible.
-API/export: `/api/room-memory` adds `semantic_map`; the session folder saves
-`semantic_map.npz` (sparse full probabilities/weights) and `semantic_map.json`.
-See [projection details and limits](../habitat_demo/room_memory/SEMANTIC_PROJECTION.md).
+Set `semantic_projection.enabled=false` to disable map projection while retaining
+detection. The checkbox only hides colors. `/api/room-memory/detection.jpg` serves
+source-aligned annotated RGB; JSON and sparse evidence are saved in the session.
+No candidate means no new evidence; scores are not calibrated correctness probabilities.
+CLIP and DINO recognizers/projection workers are parallel implementations selected through one factory. CLIP defaults to full-frame classification; `left_right` remains available. CLIP skips views when Top1 < 0.35 OR Top3 spread < 0.10, preserving previous evidence. Configure models under `semantic_backends.<backend>` and projection under `semantic_projection.backends.<backend>`. Both bind results to captured RGB-D, pose, timestamp and long-term geometry. See [backend configuration](../habitat_demo/room_memory/BACKENDS.md).
+See [details](../habitat_demo/room_memory/SEMANTIC_PROJECTION.md).
 
-The CLIP default labels are bedroom, living room, bathroom, kitchen, dining room,
-office room, gym and corridor (8 classes). Before fusion, each view is skipped if
-EITHER Top1 < `low_top1_threshold=0.35` or Top1−Top3 < `top3_spread_threshold=0.10`.
-`filter_low_confidence=true` enables this filter. Scores are normalized candidate
-probabilities, not raw cosine similarity. Skipped views leave unseen cells uncolored
-and preserve existing evidence. API `semantic_map` reports accepted/rejected views,
-reasons and `filter_timestamp` separately from the last fused `source_timestamp`.
-Legacy `semantic_projection` geometry keys (`max_range`, depth/height bounds,
-`endpoint_margin`, sample rows/columns) are accepted but ignored; `regions` owns geometry. The projection domain is the depth-visible
-part of the accumulated structural coverage; walls and invalid depth still limit it.
+### Geometry-only room partition (Habitat / Isaac)
+
+With `--room-memory`, the shipped configs enable `partition.enabled=true`.
+`partition.peak_neighborhood_m=0.4`, `opening_max_width_m=1.6`, and
+`opening_ratio=0.75` control geometric catchment seeds and bottleneck boundaries.
+No area filter removes thin candidates. Semantics are aggregated only after
+partitioning; they never determine room boundaries. Set `partition.enabled=false`
+to display the original online Room/Portal graph instead. The API adds
+`room_partition`; session files add `room_partition.json` and `room_partition.npz`.
+See [algorithm, identity and limitations](../habitat_demo/room_memory/ROOM_PARTITION.md).
+
+Room partition cleanup also supports `internal_hole_max_area_m2=2.0` and
+`internal_hole_max_extent_m=4.0` for fully enclosed, wall-free holes.
+`suppress_thin_regions=true`, `thin_max_width_m=0.45`, and
+`thin_min_aspect=3.0` merge narrow elongated basins into adjacent regions while
+retaining coverage. External gap cleanup keeps its smaller existing limits.
+See `habitat_demo/room_memory/ROOM_PARTITION.md` for criteria and limitations.
+
+### Isaac LightNav zero-command handling
+
+A controller command with both `abs(v)` and `abs(w)` below `1e-6` is executed
+as one stationary control tick; the executed zero becomes MPC's previous control.
+It no longer causes immediate `zero_command` termination. This allows
+acceleration-limited angular direction changes to cross zero.
+
+In the regular executor, `path_failure_confirmations` (default 3) consecutive
+zero ticks retire the route and request another prediction. The count survives
+real-time path replacement. `model_replan_limit` (default 3) bounds additional
+zero-command retries; a nonzero accepted command resets this zero-command budget.
+These values come from the local-navigation config, or its defaults when mapping
+is disabled. The existing batch executor with local mapping already confirms
+failures across stationary ticks and retains its own no-progress/retry rules.
+
+State `tracking.zero_command_steps`, `zero_command_replans`, and
+`last_reprediction_reason=zero_command_persistent` expose this regular-executor
+fallback. Real-time inference remains single-flight. Explicit model STOP, user
+STOP, empty predictions, solver errors, step limits and explicit guard vetoes
+retain their existing handling. Automatic turning recovery is not enabled by
+this change. Restart the simulation process to apply it.
+
+Room partition additionally uses `opening_min_width_m=0.45` to reject raster
+cracks as portals. `fill_internal_wall_islands=true`,
+`wall_island_max_area_m2=0.10`, and `wall_island_max_extent_m=0.60` allow bounded,
+fully enclosed wall fragments to be filled in the derived room envelope only.
+Raw wall evidence and navigation maps are unchanged; larger or boundary-connected
+walls remain. Set `fill_internal_wall_islands=false` to retain every wall cell.
+
+### Carter stability profiles (2026-10-20)
+
+`isaac_demo/config/robots/carter_original.json` and `carter_half_xy.json` now
+include a `stability` section. The selected robot profile owns these settings;
+edit that profile file to tune them. No new CLI switch is required. Existing
+`--max-linear` / `--max-angular` values are capped by the profile; lower requested
+values remain unchanged. The startup line prints requested and effective limits.
+
+| Setting | original | half_xy | Units |
+| --- | --- | --- | --- |
+| max_linear | 0.60 | 0.35 | m/s |
+| max_angular | 1.0 | 0.8 | rad/s |
+| linear_acceleration | 0.60 | 0.35 | m/s² |
+| linear_deceleration | 0.80 | 0.50 | m/s² |
+| angular_acceleration | 1.5 | 1.0 | rad/s² |
+| max_lateral_acceleration | 0.50 | 0.25 | m/s², bounds speed × turn rate |
+| wheel_max_torque | 12 | 2 | Nm per driven wheel |
+| wheel_damping | 20 | 5 | authored USD angular-drive damping |
+| com_lowering | 0.04 | 0.08 | m, chassis/ballast local COM offset |
+| max_depenetration_velocity | 0.5 | 0.5 | m/s |
+| solver_position_iterations | 64 | 64 | iterations |
+| solver_velocity_iterations | 4 | 4 | iterations |
+
+The default scene uses `physics_dt=1/120` and `settle_steps=180` (same 1.5 s
+settling duration). Display FPS and model/control periods do not change.
+`DriveLimiter` ramps wheel targets at every physics tick, preserves its state
+across frame/request boundaries, and resets with the physical simulation.
+Returned `applied_command` is the endpoint wheel-speed target, not a measured
+chassis velocity; the LightNav MPC adapter uses it as its previous actuator
+command. Physical body motion continues to be simulated with contacts/gravity.
+
+Original asset drives had angular damping about 17453 and unlimited torque.
+The half-XY geometry scaled mass and inertia but retained these drive settings.
+The new finite drives/low COM are conservative navigation-proxy tuning, not
+identified real Carter or Limo dynamics. Mass, visual geometry, wheel shape,
+footprint and camera transform are preserved. All USD changes remain in anonymous
+runtime layers; source assets are untouched. No roll/pitch lock, hidden upright
+reset, or automatic turning recovery is added.
+
+`/api/state` exposes `stability`, `applied_command`, `body_attitude` (roll/pitch
+in degrees), and `chassis_pose`. Restart terminal B and refresh the browser;
+terminal A does not need restarting. CPU/USD tests do not replace a physical
+simulation check in the actual scene.
+
+Reference: [NVIDIA articulation stability guide](https://docs.omniverse.nvidia.com/kit/docs/omni_physics/107.2/dev_guide/guides/articulation_stability_guide.html).

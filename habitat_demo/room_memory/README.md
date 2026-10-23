@@ -19,7 +19,7 @@
 
 1. 瓶颈可能是桌椅之间、同一房间内部或走廊拐角。`crossing_confirmed` 只表示几何穿越证据，**不表示建筑学房间分割已证明正确**。开放式客餐厅没有可靠几何边界时可能仍是同一节点。
 2. 前向相机无法在所有转弯、斜门、玻璃、遮挡或过窄视野下识别门户。当前默认 YOLOE-26s 提议开口，允许单侧墙面辅助深度定位，但模型本身仍可能漏检，不保证完整召回，宁可保留 unknown/漏检，也不按语义标签变化分房间。
-3. `semantic_confidence` 和 probabilities 是分类器输出，未做概率校准；不能直接当作研究中的可信概率或失败触发阈值。默认 Places365 是固定 365 类场景分类器，通过人工映射聚合到房间类别，不具备千问的开放词汇与多图语言推理能力。未映射类别和低置信度保留 unknown。
+3. `semantic_confidence` 和 probabilities 是分类器输出，未做概率校准；不能直接当作研究中的可信概率或失败触发阈值。默认 CLIP 输出预设类别分布；可选 Grounding DINO-T 输出区域候选和文本匹配分数；无达标候选不强制分类。Places365 可选，保留原 365 类 Top1。
 4. `entered/glanced/partial` 是观测证据量，不等于搜索完成度。`unseen` 用于尚未进入的候选空间，`well_observed` 仍预留，本版不会凭五张图声称覆盖了整个房间。
 5. Habitat 深度是理想的米制轴向深度，不是 D455 的完整噪声模型。当前采用默认网页相机内参和视野，后续实车需提供真实内参、对齐方式、相机到机器人外参及深度单位转换。
 6. GT pose 下的已知门户回访可复用端点；视觉模式不自动合并从两个不同门口看到的候选空间。旧纯深度模式保留近邻轨迹关联。隔墙近邻、别名相似房间、复杂环路仍需独立验证，图像 embedding 接口没有安装后端。
@@ -52,7 +52,7 @@ flowchart LR
 - `models.py:PoseSource.pose_at(timestamp, observation)`：提供与帧同步的 `(x,y,yaw)`；`HabitatGTPoseSource` 是当前适配器。实车里程计/VIO/ROS 适配器只需实现同一接口；本次未实现实车定位。
 - `RGBDFrame(timestamp, rgb, depth, pose, camera, elevation=None)`：RGB 是 JPEG bytes，depth 是 H×W 米制轴向深度；相机参数由 `CameraModel` 显式给出；可选 elevation 用于单层高度保护。
 - Core 世界坐标：+X 初始向前，+Y 左侧，yaw 正向逆时针；Habitat 映射为 `x=-habitat.z, y=-habitat.x, yaw=habitat.yaw`。机器人局部坐标为前/左/上；光学坐标为右/下/前。`camera_to_robot` 明确执行转换。
-- `RoomSemanticClassifier.classify(frames)`：异步多视图分类，不接触 room_id 分配和运动。默认实现为 `places365_recognizer.py:Places365Recognizer`；`RoomEmbeddingSimilarity` 仅预留相似度接口。
+- `RoomSemanticClassifier.classify(frames)`：异步多视图分类，不接触 room_id 分配和运动。默认实现为 `clip_recognizer.py:CLIPRecognizer`，可选 `groundingdino_recognizer.py:GroundingDINORecognizer`；`RoomEmbeddingSimilarity` 仅预留相似度接口。
 - `RoomGraphManager.observe(frame)`：可以离线重放，也可由 Habitat/MuJoCo/机器人适配器喂入。核心不 import Habitat 或模型代码。
 
 ## 门户与房间转换
@@ -88,7 +88,7 @@ Places365 对每张图独立推理，先按 `config/places365_room_mapping.json`
 
 ## 启用
 
-默认使用本地 Places365，**不用输入 API key，也不用手动启动 Places365 服务**。在 Habitat 终端运行：
+当前默认使用 omnivla 环境的 CLIP 常驻 CPU 子进程，可选独立环境的 Grounding DINO-T，无需 API key 或手动启动检测服务。在 Habitat 终端运行：
 
 ```bash
 conda activate omnivla-habitat
@@ -100,7 +100,7 @@ CUDA_VISIBLE_DEVICES=1 ./run.sh \
   --room-memory --room-memory-config room_memory/config/default.json
 ```
 
-先停止原 8090 Habitat 进程再启动；导航模型服务继续用原命令。默认读取 `/home/xrq/projects/places365/resnet18_places365.pth.tar` 和同目录的类别表，通过 `/home/xrq/.conda/envs/places365/bin/python` 启动常驻推理子进程。模型首次分类时加载一次，后续请求复用；CPU 默认 2 个线程，取消/超时或关闭时清理子进程。失败会显示在节点语义状态中，几何仍可继续记录。
+先停止原 8090 Habitat 进程再启动；导航模型服务继续用原命令。显式选择 `--room-semantic-backend places365` 时读取 `/data/disk1/xrq/projects/places365/resnet18_places365.pth.tar` 和同目录的类别表，通过 `/home/xrq/.conda/envs/places365/bin/python` 启动常驻推理子进程。模型首次分类时加载一次，后续请求复用；CPU 默认 2 个线程，取消/超时或关闭时清理子进程。失败会显示在节点语义状态中，几何仍可继续记录。
 
 本机环境检查：`omnivla-habitat` 为 Python 3.9.23 / NumPy 1.20.3，没有 torch/torchvision；`places365` 为 Python 3.10.22 / torch 2.2.0+cu121 / torchvision 0.17.0+cu121 / NumPy 1.26.4，没有 Habitat。现有两个环境不能直接作为同一个 Python 进程使用，因此默认保留它们，通过标准输入/输出传递少量 JPEG。这里只需一条 Habitat 启动命令，Python 子进程由程序管理；没有合并或升级现有环境。
 
@@ -140,14 +140,17 @@ cd ~/projects/LightNav-0/habitat_demo
 
 2026-10-06 的视觉门户版本已接入 YOLOE-26s，并修正了扫描地面与 navmesh 高度差造成的门宽低估。重新回放该 134 点轨迹，29 次有效观测合并成一个未进入的蓝色门口；但原路线实际穿过的侧门仍被 RGB 模型漏检，不能据此声称侧门问题全部解决。另用 Habitat 可通行路线穿过已检测的门口并返回，真实 RGB-D + YOLOE 回放获得同一个红色 P0、两个正式节点并复用 R0。详见 [验证记录](../docs/VISUAL_PORTALS_VERIFICATION.md)。
 
-## CLIP 与 Places365 可选后端
+## Grounding DINO-T 房间区域检测
 
-新增 `clip_recognizer.py`：通过已有 `omnivla` 环境的常驻 CPU 子进程加载本地 OpenAI CLIP ViT-B/32；默认类别为 bedroom、living room、bathroom、kitchen、dining room、office room、gym、corridor。文本模板先编码、归一化和平均，每张 RGB 计算候选类别内的分数；多视图仍平均每帧概率后取 Top-1，不按阈值过滤。两种模型不决定 Room ID 或门户跨越。
+当前默认后端为 `clip`；通过 `--room-semantic-backend groundingdino` 选择独立 CUDA 检测后端。两套代码并列保留，见 [后端切换](BACKENDS.md)；Places365 可用 `--room-semantic-backend places365` 选择。检测不会创建 Portal 或改变 Room ID、导航控制。第一张画面显示源帧的原图检测框；按区域深度投影并融合长期语义图。
 
-在原 Habitat 命令中增加 `--room-semantic-backend clip`，改为 `places365` 即切回原识别器。默认配置仍保留 Places365；CLI 切换只替换语义后端，详情见 [配置说明](../CONFIGURATION.md)。网页实时标题和 `semantic_metadata` 记录实际后端。修改后重启 Habitat 并刷新网页，保留 LightNav/OmniVLA 模型服务。
+配置、坐标约定、分数与局限见 [语义证据图](SEMANTIC_PROJECTION.md) 和 [配置说明](../CONFIGURATION.md)。独立测试：
 
-`compare_semantics.py` 用同一组 1–5 张房间 JPEG 串行调用两个后端，保存图像 SHA256、首轮/热模型请求耗时、类别分布和配置。两个后端候选类别数不同，分数不可直接比较为准确率。CLIP 的固定类别更贴合当前 Room Node 定义，但其实际准确率需要同图人工标注对比；特别要观察 living room/dining room 等相似类别的混淆。
+```bash
+cd ~/projects/LightNav-0/habitat_demo
+~/.conda/envs/groundingdino/bin/python -m room_memory.groundingdino_recognizer /path/to/image.jpg --output runs/detection.json --annotated runs/detection.jpg
+```
 
-参考：[OpenAI CLIP](https://github.com/openai/CLIP)、[Places365](https://github.com/CSAILVision/places365)。本次同图联调报告见 [JSON](../docs/clip-places365-comparison-20261007.json)，它只有一张图，不是准确率基准。
+## 独立几何房间分割
 
-2026-10-16：CLIP 长期语义图默认使用整图（view_mode=full，左右子图保留为 left_right 选项）、8 类、无固定 3 米投影半径；融合前过滤低分或接近的 Top3。节点与实时分类仍保留原行为，详见 [语义投影](SEMANTIC_PROJECTION.md)。
+默认启用 `partition`：长期范围几何直接分割房间，在质心显示 Rn 和区域语义汇总，不依赖旧 Room/Portal 节点。细长候选保留，边界随观测变化。几何推断的开口标为候选，不替代已验证的在线门检测。详见 [ROOM_PARTITION.md](ROOM_PARTITION.md)。

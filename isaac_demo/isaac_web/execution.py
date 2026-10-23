@@ -4,7 +4,7 @@ import asyncio
 from copy import deepcopy
 
 from habitat_web.waypoint_overlay import project_waypoints
-from local_navigation.models import pose_tuple
+from local_navigation.models import NavigationConfig, pose_tuple
 
 from .tracking import PathTracker, WorldPath
 
@@ -32,6 +32,10 @@ async def execute_path(runtime, tracker, waypoints, capture_pose, *, refresh=Non
     needs_replan = not path
     began = r.state['sim_time']
     moved = False
+    tracking = r.state['tracking']
+    cfg = r.local_navigation.config if r.local_navigation else NavigationConfig()
+    tracking.setdefault('zero_command_steps', 0)
+    tracking.setdefault('zero_command_replans', 0)
     while not r.max_steps or r.state['step'] < r.max_steps:
         if refresh is not None and refresh.ready():
             return True  # Consume/swap the next capture-aligned path between steps.
@@ -76,33 +80,53 @@ async def execute_path(runtime, tracker, waypoints, capture_pose, *, refresh=Non
         linear, angular = await r.filter_command(linear, angular, tracker.dt)
         if refresh is not None and refresh.ready():
             return True  # A STOP/error/new route can arrive while the solver runs.
-        if abs(linear) < 1e-6 and abs(angular) < 1e-6:
-            # Try a fresh local correction before turning; it never calls the model.
-            if not needs_replan and r.local_navigation:
-                repaired = await r.prepare_path(remaining, dict(x=0., y=0., yaw=0.))
-                if repaired:
-                    complete_plan = complete_plan and full_plan(r, len(remaining))
-                    route = WorldPath(repaired, pose, r.path_position_tolerance, r.path_yaw_tolerance)
-                    linear, angular = await tracker.command(route.remaining(pose), pose,
-                        finish_segment=not r.realtime_update, position_tolerance=r.path_position_tolerance)
-                    linear, angular = await r.filter_command(linear, angular, tracker.dt)
-            if abs(linear) < 1e-6 and abs(angular) < 1e-6:
-                if await r.recover_blocked():
-                    tracker.previous = (0., 0.)
-                    if r.realtime_update:
-                        return True
-                    needs_replan = True
-                    continue
-                r.state['stop_reason'] = r.state.get('navigation_reason') or 'zero_command'
-                return False
+        zero = abs(linear) < 1e-6 and abs(angular) < 1e-6
+        if zero and r.state.get('navigation_reason', '').startswith('blocked_command_'):
+            # An explicit guard veto is different from a controller zero crossing.
+            if await r.recover_blocked():
+                tracker.previous = (0., 0.)
+                needs_replan = True
+                continue
+            r.state['stop_reason'] = r.state['navigation_reason']
+            return False
+        if zero:
+            # Execute the zero crossing before solving again. Re-solving with
+            # the old previous control repeats the acceleration-limited zero.
+            linear, angular = 0., 0.
+        else:
+            tracking.update(zero_command_steps=0, zero_command_replans=0)
         if refresh is not None and refresh.ready():
             return True
         r.state['tracking']['command'] = [linear, angular]
         observation = await r._sim_call(r.scene.step, linear, angular, tracker.dt)
-        tracker.previous = (linear, angular)  # Guarded, executed command, not solver proposal.
+        tracker.previous = tuple(observation.get("applied_command", (linear, angular)))
         r._publish(observation, preserve_view=True)
         r.state['step'] += 1
-        moved = True
+        stationary = all(abs(v) < 1e-6 for v in tracker.previous)
+        moved = moved or not stationary
+        if not stationary:
+            tracking.update(zero_command_steps=0, zero_command_replans=0)
+        if zero and stationary:
+            tracking['zero_command_steps'] += 1
+            tracking['request_reason'] = 'zero_command_hold'
+            if r.max_steps and r.state['step'] >= r.max_steps:
+                r.state['stop_reason'] = 'step_limit'
+                return False
+            if tracking['zero_command_steps'] >= cfg.path_failure_confirmations:
+                # Preserve explicitly enabled recovery, without turning it on.
+                if await r.recover_blocked():
+                    tracker.previous = (0., 0.)
+                    tracking['zero_command_steps'] = 0
+                    needs_replan = True
+                    continue
+                if tracking['zero_command_replans'] >= cfg.model_replan_limit:
+                    r.state['stop_reason'] = 'model_replan_limit'
+                    return False
+                tracking['zero_command_replans'] += 1
+                tracking.update(zero_command_steps=0,
+                    request_reason='zero_command_persistent',
+                    last_reprediction_reason='zero_command_persistent')
+                return True  # Retire this route and await the next prediction.
         if (r.local_snapshot.get('execution_collision_check', False)
                 and linear > 1e-6 and observation.get('collided')):
             if not await r.recover_blocked():

@@ -22,6 +22,7 @@ from .geometry import (
     grounded_camera_pose,
     wheel_speeds,
 )
+from .stability import DriveLimiter, configure_carter_dynamics
 from .usd_scene import normalize_mdl_source_paths, repair_static_colliders
 
 
@@ -29,6 +30,7 @@ class CarterScene:
     def __init__(self, config, *, progress_callback=None, error_callback=None):
         self.progress_callback = progress_callback
         self.cfg = config
+        self.drive_limiter = DriveLimiter(config.get("stability", {}))
         self.app = None
         self.sim_time = 0.
         self.collided = False
@@ -123,6 +125,7 @@ class CarterScene:
             orientation=self.start_orientation,
         ))
         resize_carter(stage.GetPrimAtPath("/World/Carter"), cfg.get("robot_xy_scale", 1.))
+        configure_carter_dynamics(stage.GetPrimAtPath("/World/Carter"), cfg.get("stability", {}))
         self.robot.set_default_state(self.start_position, self.start_orientation)
         self._progress("physics", "初始化物理与 Carter 落地（可能包含资产加载）")
         faulthandler.dump_traceback_later(180, repeat=True)
@@ -152,6 +155,7 @@ class CarterScene:
         self.robot.apply_wheel_actions(ArticulationAction(joint_velocities=speeds))
 
     def _settle(self):
+        self.drive_limiter.reset()
         self._wheels(0., 0.)
         for _ in range(self.cfg["settle_steps"]):
             self.world.step(render=False)
@@ -178,10 +182,11 @@ class CarterScene:
         physics_ms = 0.
         fps = self.cfg.get("display_fps", 15.)
         interval = max(1, math.ceil(1 / (fps * self.cfg["physics_dt"]))) if fps else count
-        self._wheels(linear, angular)
         try:
             for index in range(count):
                 physics_start = time.monotonic()
+                applied = self.drive_limiter.advance(linear, angular, self.cfg["physics_dt"])
+                self._wheels(*applied)
                 self.world.step(render=False)
                 physics_ms += (time.monotonic() - physics_start) * 1000
                 self.sim_time = initial_time + (index + 1) * self.cfg["physics_dt"]
@@ -328,6 +333,10 @@ class CarterScene:
             pose=pose, pose_frame="ground_projected_base",
             chassis_pose=dict(position=p.tolist(), orientation_wxyz=q.tolist()),
             sim_time=self.sim_time, floor_elevation=self.cfg["floor_z"],
+            applied_command=list(self.drive_limiter.command),
+            body_attitude=dict(roll_deg=math.degrees(math.atan2(rotation[2, 1], rotation[2, 2])),
+                               pitch_deg=math.degrees(math.atan2(-rotation[2, 0],
+                                   math.hypot(rotation[2, 1], rotation[2, 2])))),
             collided=self.collided, depth_definition="camera_forward_z_meters",
             simulator="Isaac Sim · Carter",
         )

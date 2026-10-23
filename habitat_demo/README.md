@@ -2,7 +2,7 @@
 
 服务器在无显示器模式下运行 Habitat，浏览器实时显示 RGB；页面输入语言指令并选择模型。视觉风格复用 MuJoCo 深色页面，功能仅包括相机、语言输入、模型选择、开始、停止、重置和延迟/步数显示。
 
-默认保持简洁页面；可用 `--room-memory` 额外启用基于前向 RGB-D 的房间记忆图，包含独立 YOLOE-26s 门口检测与 Places365 房间语义。没有雷达、ROS、小车部署控制台或复杂暂停工作流。现有 MuJoCo、OmniVLA 和 LightNav 模型源码未改动。页面选择模型只是选择连接的服务，不会自动加载权重。
+默认保持简洁页面；可用 `--room-memory` 额外启用基于前向 RGB-D 的房间记忆图，包含独立 YOLOE-26s 门口检测与 CLIP / Grounding DINO-T 可选房间语义。没有雷达、ROS、小车部署控制台或复杂暂停工作流。现有 MuJoCo、OmniVLA 和 LightNav 模型源码未改动。页面选择模型只是选择连接的服务，不会自动加载权重。
 
 ## 启动
 
@@ -114,8 +114,8 @@ OmniVLA 的 `[x,y,cosθ,sinθ]` 按现有部署约定将位置乘 0.1 转成米�
   --room-memory --room-memory-config room_memory/config/default.json
 ```
 
-网页将增加 2D 轨迹、房间节点、已穿越的门户、当前箭头和代表图。默认使用本地 **Places365 ResNet18**，无需 API key。Habitat 会自动调用已有 `places365` 环境的常驻子进程，在 CPU 上对少量代表视角分类；无需另外开终端启动识别服务。几何处理与语义识别在独立队列执行，不给导航下发动作。
+网页将增加 2D 轨迹、房间节点、已穿越的门户、当前箭头和代表图。默认使用本地 **CLIP ViT-B/32**（omnivla 环境，CPU）；`--room-semantic-backend groundingdino` 可切换至独立 groundingdino 环境的 GPU 区域检测。两者均支持语义投影，无需 API key，详见 [并列后端配置](room_memory/BACKENDS.md)。使用 `--room-semantic-backend places365` 可选择原 CPU 分类器。无需另外开终端启动识别服务。几何处理与语义识别在独立队列执行，不给导航下发动作。
 
-默认读取 `/home/xrq/projects/places365` 中的权重和类别表。路径、Python 解释器、线程数及运行模式在 `room_memory/config/default.json` 的 `semantic` 中配置。365 类结果按映射表汇总到房间类别；未映射类别和低置信度结果保留 unknown。
+选择 Places365 时读取 `/data/disk1/xrq/projects/places365` 中的权重和类别表。路径、Python 解释器、线程数及运行模式在 `room_memory/config/default.json` 的 `semantic` 中配置。365 类结果按映射表汇总到房间类别；未映射类别和低置信度结果保留 unknown。
 
 开口只是几何候选，实际跨越后才连边；不保证得到完整建筑房间划分。设计取舍、开源参考、接口、存储方式和启动命令见 [room_memory/README.md](room_memory/README.md)，增量验证见 [docs/ROOM_MEMORY_VERIFICATION.md](docs/ROOM_MEMORY_VERIFICATION.md)。

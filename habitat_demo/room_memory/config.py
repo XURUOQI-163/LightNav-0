@@ -78,6 +78,8 @@ def load_config(path=None, semantic_backend=None):
         "doorway",
         "regions",
         "semantic_projection",
+        "semantic_backends",
+        "partition",
     }:
         raise ValueError(
             "room memory config requires memory/geometry/semantic/doorway/regions objects"
@@ -125,6 +127,21 @@ def load_config(path=None, semantic_backend=None):
             "live_enabled": True,
             "live_interval": 1.0,
         }
+    elif backend == "groundingdino":
+        from .groundingdino_recognizer import (
+            DEFAULT_BERT,
+            DEFAULT_CONFIG,
+            DEFAULT_LABELS,
+            DEFAULT_MODEL,
+        )
+        from .groundingdino_recognizer import DEFAULT_PYTHON as DETECTOR_PYTHON
+
+        semantic = {
+            "backend": backend, "model_path": DEFAULT_MODEL, "config_path": DEFAULT_CONFIG,
+            "bert_path": DEFAULT_BERT, "python_executable": DETECTOR_PYTHON,
+            "labels": list(DEFAULT_LABELS), "device": "cuda:0", "num_threads": 2,
+            "box_threshold": .25, "timeout": 120., "live_enabled": True, "live_interval": 1.5,
+        }
     elif backend == "qwen":
         semantic = {
             "backend": backend,
@@ -133,7 +150,17 @@ def load_config(path=None, semantic_backend=None):
             "timeout": 20.0,
         }
     else:
-        raise ValueError("semantic.backend must be places365, clip or qwen")
+        raise ValueError("semantic.backend must be places365, clip, groundingdino or qwen")
+    profiles = value.get("semantic_backends", {})
+    if set(profiles) - {"clip", "groundingdino", "places365", "qwen"} or any(
+        not isinstance(profile, dict) for profile in profiles.values()
+    ):
+        raise ValueError("invalid semantic_backends profiles")
+    profile = profiles.get(backend, {})
+    if "backend" in profile:
+        raise ValueError("semantic_backends entries must omit backend")
+    # An explicit legacy semantic object wins for its own backend only.
+    provided = {**profile, **provided}
     if set(provided) - set(semantic):
         raise ValueError(
             f"unknown {backend} semantic config key; API keys belong in environment variables"
@@ -180,11 +207,31 @@ def load_doorway_config(path=None):
     return result
 
 
-def load_projection_config(path=None):
+def load_projection_config(path=None, semantic_backend=None):
     from .semantic_projection import ProjectionConfig
 
     value = json.loads(Path(path).read_text()) if path else {}
+    options = dict(value.get("semantic_projection", {}))
+    profiles = options.pop("backends", {})
+    backend = semantic_backend or value.get("semantic", {}).get("backend", "places365")
+    if not isinstance(profiles, dict) or set(profiles) - {"clip", "groundingdino"} or any(
+        not isinstance(profile, dict) for profile in profiles.values()
+    ):
+        raise ValueError("invalid semantic_projection.backends")
+    # Restore CLIP's former defaults when switching an older detector config.
+    if backend == "clip" and options.get("view_mode") == "detections":
+        options.update(view_mode="full", filter_low_confidence=True)
+    options.update(profiles.get(backend, {}))
+    if backend == "groundingdino":
+        options.update(view_mode="detections", filter_low_confidence=False)
     try:
-        return ProjectionConfig(**value.get("semantic_projection", {}))
+        return ProjectionConfig(**options)
     except TypeError as exc:
         raise ValueError("unknown semantic_projection configuration key") from exc
+
+
+def load_partition_config(path=None):
+    from .partition import PartitionConfig
+
+    value = json.loads(Path(path).read_text()) if path else {}
+    return PartitionConfig(**value.get('partition', {}))

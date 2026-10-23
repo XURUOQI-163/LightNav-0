@@ -1,0 +1,8 @@
+numpy==1.26.4
+transformers==4.38.2
+timm==0.9.16
+yapf==0.40.1
+opencv-python==4.10.0.84
+supervision==0.22.0
+torch==2.2.2
+torchvision==0.17.2

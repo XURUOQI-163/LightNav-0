@@ -105,7 +105,13 @@ def test_blocked_path_turns_without_collision_guard_and_requests_fresh_waypoints
 
             def guard(self, command, *args, **kwargs):
                 super().guard(command, *args, **kwargs)
-                return (0., 0.) if self.time < self.clear_after else command
+                if self.time < self.clear_after:
+                    # Match the real guard's explicit veto metadata; a bare
+                    # zero now means a controller deceleration tick instead.
+                    self.status, self.reason = 'blocked', 'blocked_command_occupied'
+                    self._snapshot = self._build_snapshot()
+                    return (0., 0.)
+                return command
 
         nav = Navigation(NavigationConfig(initial_clear_radius_m=0, recovery_max_turn_deg=360.), SMALL, .663, 'half_xy')
         runtime = IsaacRuntime(RecoveryScene, {'lightnav': 'unused'}, local_navigation=nav,
@@ -116,8 +122,12 @@ def test_blocked_path_turns_without_collision_guard_and_requests_fresh_waypoints
             await runtime.start('lightnav', 'go')
             await asyncio.wait_for(runtime.task, 4.)
             moves = runtime.scene.moves
-            assert len(moves) == 3 and moves[0][0] == moves[1][0] == 0
-            assert moves[0][1] > 0 and moves[1][1] > 0 and moves[2][0] > 0
+            # Explicit guard recovery resumes the retained route before the
+            # next real-time request; an initially missing route requests first.
+            assert len(moves) == (4 if blocked_by_command else 3)
+            assert moves[0][0] == moves[1][0] == 0
+            assert moves[0][1] > 0 and moves[1][1] > 0
+            assert all(v > 0 for v, _, _ in moves[2:])
             assert client.frames[0] != client.frames[1]  # no stale prediction replay
             assert runtime.state['stop_reason'] == 'model_stop'
         finally:

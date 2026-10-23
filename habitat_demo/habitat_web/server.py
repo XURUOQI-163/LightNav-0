@@ -29,6 +29,10 @@ def create_app(runtime):
 
     async def state(_request):
         snapshot = getattr(runtime, "status_snapshot", lambda: runtime.state)()
+        memory = getattr(runtime, "room_memory", None)
+        snapshot = dict(snapshot, room_detection_enabled=bool(
+            memory and getattr(memory, "semantic_backend", None) == "groundingdino"),
+            room_detection_session_id=getattr(memory, "session_id", None))
         return web.json_response(snapshot, headers={"Cache-Control": "no-store"})
 
     async def camera(_request):
@@ -198,6 +202,17 @@ def create_app(runtime):
         return web.json_response(getattr(runtime, 'local_snapshot', {'enabled': False}),
                                  headers={'Cache-Control': 'no-store'})
 
+    async def detection_image(request):
+        memory = getattr(runtime, "room_memory", None)
+        frame = memory.projection.detection_frame if memory else None
+        if frame is None:
+            raise web.HTTPServiceUnavailable(text="room detector waiting for source frame")
+        headers = {"Cache-Control": "no-store", "X-Frame-Id": frame["frame_id"],
+                   "X-Sim-Time": str(frame["timestamp"])}
+        if request.query.get("after") == frame["frame_id"]:
+            return web.Response(status=204, headers=headers)
+        return web.Response(body=frame["jpeg"], content_type="image/jpeg", headers=headers)
+
     async def memory_frame(request):
         if runtime.room_memory is None:
             raise web.HTTPNotFound()
@@ -212,6 +227,7 @@ def create_app(runtime):
     app.router.add_get("/api/state", state)
     app.router.add_get("/api/camera.jpg", camera)
     app.router.add_get("/api/room-memory", memory_state)
+    app.router.add_get("/api/room-memory/detection.jpg", detection_image)
     app.router.add_get('/api/local-navigation', local_navigation)
     app.router.add_get("/api/room-memory/export", memory_state)
     app.router.add_get(r"/api/room-memory/frames/{frame_id:F\d+}.jpg", memory_frame)

@@ -455,6 +455,7 @@ class RoomGraphManager:
                 asdict(r) for r in self.rooms.values() if isinstance(r, ProspectiveRoom)
             ],
             schema_version=3,
+            room_partition=self.room_partition.state if hasattr(self, "room_partition") else None,
             semantic_metadata=self.semantic_metadata,
             structure=dict(
                 self.structure.diagnostics(),

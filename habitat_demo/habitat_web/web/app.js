@@ -51,7 +51,7 @@ async function request(path, options = {}, timeoutMs = 5000, asImage = false) {
       let waypoints = null;
       try { pointing = JSON.parse(response.headers.get("X-Pointing") || "null"); } catch (_) {}
       try { waypoints = JSON.parse(response.headers.get("X-Waypoints") || "null"); } catch (_) {}
-      return {blob: await response.blob(), pointing, waypoints, frameId: response.headers.get("X-Frame-Id")};
+      return {blob: await response.blob(), pointing, waypoints, frameId: response.headers.get("X-Frame-Id"), simTime: response.headers.get("X-Sim-Time")};
     }
     const payload = await response.json();
     if (!response.ok || payload.ok === false) throw new Error(payload.error || `请求失败（${response.status}）`);
@@ -85,10 +85,13 @@ function render() {
   ui.title.textContent = `${simulator} Viewer`;
   ui.viewer.setAttribute("aria-label", `${simulator} 实时画面`);
   const live = state?.live_view === true;
+  const detection = state?.room_detection_enabled === true;
+  byId("first-view-title").textContent = detection ? "原始 RGB · Grounding DINO-T 检测帧" : "第一人称实时";
+  byId("room-detection-frame-info").hidden = !detection;
   ui.image.alt = `${simulator} ${live ? "模型输入与预测点" : "第一人称 RGB"} 画面`;
-  byId("camera-views").classList.toggle("three-views", live);
-  document.querySelector(".shell").classList.toggle("multi-view", live);
-  byId("first-view").hidden = !live;
+  byId("camera-views").classList.toggle("three-views", live || detection);
+  document.querySelector(".shell").classList.toggle("multi-view", live || detection);
+  byId("first-view").hidden = !(live || detection);
   byId("third-view").hidden = !live;
   byId("prediction-title").textContent = live ? "模型输入与预测点" : "第一人称 RGB";
   byId("live-metrics").hidden = !live;
@@ -170,6 +173,13 @@ async function pollState() {
   try {
     const next = await request("/api/state");
     if (!pageActive || generation !== pageGeneration) return;
+    if (next.room_detection_session_id !== state?.room_detection_session_id) {
+      const first = views[0];
+      if (first.imageUrl) URL.revokeObjectURL(first.imageUrl);
+      first.imageUrl = null; first.lastFrame = null;
+      first.image.removeAttribute("src"); first.image.hidden = true;
+      byId("room-detection-frame-info").textContent = "等待本会话检测帧";
+    }
     state = next;
     connected = true;
     connectionError = "";
@@ -193,11 +203,13 @@ async function pollState() {
 async function pollCamera(view) {
   const generation = pageGeneration;
   const live = view.name !== "prediction";
+  const detection = view.name === "first" && state?.room_detection_enabled === true;
+  const detectionSession = state?.room_detection_session_id;
   try {
-    if (!pageActive || !connected || state?.scene_ready === false || (live && state?.live_view !== true)) return;
+    if (!pageActive || !connected || state?.scene_ready === false || (live && !detection && state?.live_view !== true)) return;
     const frame = state?.frame_id;
     if (!live && frame != null && frame === view.lastFrame && view.imageUrl) return;
-    const path = live ? `/api/display.jpg?view=${view.name}&after=${encodeURIComponent(view.lastFrame ?? "")}`
+    const path = detection ? `/api/room-memory/detection.jpg?after=${encodeURIComponent(view.lastFrame ?? "")}` : live ? `/api/display.jpg?view=${view.name}&after=${encodeURIComponent(view.lastFrame ?? "")}`
       : `/api/camera.jpg?frame_id=${encodeURIComponent(frame ?? Date.now())}`;
     const result = await request(path, {}, 5000, true);
     if (!pageActive || generation !== pageGeneration) return;
@@ -207,7 +219,7 @@ async function pollCamera(view) {
     const decoded = new Image();
     decoded.src = nextUrl;
     try { await decoded.decode(); } catch (error) { URL.revokeObjectURL(nextUrl); throw error; }
-    if (!pageActive || generation !== pageGeneration) { URL.revokeObjectURL(nextUrl); return; }
+    if (!pageActive || generation !== pageGeneration || (detection && detectionSession !== state?.room_detection_session_id)) { URL.revokeObjectURL(nextUrl); return; }
     const previousUrl = view.imageUrl;
     view.imageUrl = nextUrl;
     view.image.src = nextUrl;
@@ -216,7 +228,11 @@ async function pollCamera(view) {
     if (!live) pointingView.set(pointing, decoded.naturalWidth, decoded.naturalHeight, waypoints);
     if (previousUrl) URL.revokeObjectURL(previousUrl);
     view.lastFrame = live ? frameId : (frameId == null ? frame : Number(frameId));
-    if (view.name === "first") displayedTimes.push(performance.now());
+    if (view.name === "first") {
+      if (!detection) displayedTimes.push(performance.now());
+      if (detection) byId("room-detection-frame-info").textContent = `采集时刻 ${Number(result.simTime).toFixed(2)} s · 框与此原图同步；等待下一次检测时保留本帧`;
+    }
+    if (view.name === "third" && state?.room_detection_enabled) displayedTimes.push(performance.now());
     view.error = "";
   } catch (error) {
     if (pageActive && generation === pageGeneration) view.error = error.message;
@@ -224,7 +240,7 @@ async function pollCamera(view) {
     if (pageActive && generation === pageGeneration) {
       render();
       // Independent serial loops: a slow/broken channel cannot stall another.
-      schedule(() => pollCamera(view), live && state?.live_view ? 40 : 150);
+      schedule(() => pollCamera(view), detection ? 200 : live && state?.live_view ? 40 : 150);
     }
   }
 }

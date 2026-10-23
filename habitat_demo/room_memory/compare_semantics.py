@@ -10,11 +10,15 @@ from pathlib import Path
 
 from .clip_recognizer import CLIPRecognizer
 from .config import load_config
+from .groundingdino_recognizer import GroundingDINORecognizer
 from .places365_recognizer import Places365Recognizer
 from .semantics import SemanticFrame, _validate_frames
 
 
-async def compare_images(paths, config=None):
+async def compare_images(paths, config=None, backends=("clip", "groundingdino")):
+    constructors = {"clip": CLIPRecognizer, "groundingdino": GroundingDINORecognizer, "places365": Places365Recognizer}
+    if not backends or any(b not in constructors for b in backends) or len(set(backends)) != len(backends):
+        raise ValueError("choose unique clip/groundingdino/places365 backends")
     frames, images = [], []
     for i, path in enumerate(paths):
         path = Path(path)
@@ -29,9 +33,10 @@ async def compare_images(paths, config=None):
     report = dict(
         images=images,
         results={},
-        note="1..5 views of ONE room; CLIP 10-way and Places365 365-way scores are not comparable accuracy estimates.",
+        note="1..5 views of ONE room; backend scores are not comparable accuracy estimates.",
     )
-    for backend, constructor in (("clip", CLIPRecognizer), ("places365", Places365Recognizer)):
+    for backend in backends:
+        constructor = constructors[backend]
         _, _, options = load_config(config, semantic_backend=backend)
         for key in ("backend", "live_enabled", "live_interval"):
             options.pop(key, None)
@@ -59,10 +64,11 @@ def main():
     parser.add_argument("images", nargs="+", type=Path, help="1..5 JPEG views of the same room")
     parser.add_argument("--config", type=Path, help="Optional room-memory JSON")
     parser.add_argument("--output", type=Path, required=True, help="JSON comparison report")
+    parser.add_argument("--backends", nargs="+", choices=("clip", "groundingdino", "places365"), default=["clip", "groundingdino"])
     args = parser.parse_args()
     if not 1 <= len(args.images) <= 5:
         parser.error("provide 1..5 images of one room; compare different rooms separately")
-    report = asyncio.run(compare_images(args.images, args.config))
+    report = asyncio.run(compare_images(args.images, args.config, args.backends))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     for backend, result in report["results"].items():

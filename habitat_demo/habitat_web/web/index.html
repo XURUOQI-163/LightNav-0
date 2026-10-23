@@ -26,7 +26,8 @@
       </div>
       <div id="camera-views" class="camera-views">
         <section id="first-view" class="camera-tile" aria-label="第一人称实时" hidden>
-          <h2>第一人称实时</h2>
+          <h2 id="first-view-title">第一人称实时</h2>
+          <p id="room-detection-frame-info" hidden></p>
           <div class="camera">
             <img id="first-camera-image" alt="第一人称实时 RGB 画面" hidden>
             <p id="first-camera-message" class="camera-message" role="status">等待场景画面…</p>
@@ -120,7 +121,7 @@
       </div>
       <p id="room-map-note" class="room-map-note">这是不完整观测图。开启语义投影时，颜色表示该格子多视角融合后的房间类别，灰色表示几何已观测但暂无语义证据；颜色不是通行性或精确房间分割。虚线边界尚未闭合，实线表示墙体证据。空白可能尚未观测。节点是入口或候选空间的显示锚点；红色仅表示已穿越，不代表完整搜索；类型后的 ? 表示暂定分类。</p>
       <div class="room-map-legend" aria-label="地图图例">
-        <label><input id="room-semantic-toggle" type="checkbox" checked> CLIP 语义投影</label>
+        <label><input id="room-semantic-toggle" type="checkbox" checked> <span id="room-semantic-provider">语义投影</span></label>
         <label><input id="room-regions-toggle" type="checkbox" checked> 显示房间范围</label>
         <span><i class="legend-trajectory"></i>行走轨迹</span>
         <span><i class="legend-room"></i>已进入空间 / 已穿越门口</span>
@@ -140,11 +141,11 @@
         </div>
         <aside id="room-detail" class="room-detail" aria-label="所选房间详情">
           <h3 id="room-detail-title">房间详情</h3>
-          <p class="hint">R0、R1 是空间节点编号；候选空间进入后沿用原编号。</p>
+          <p id="room-identity-note" class="hint">R0、R1 是空间节点编号；候选空间进入后沿用原编号。</p>
           <p id="room-detail-empty" class="hint">点击空间节点或门口查看观测记录。</p>
           <div id="room-detail-content" hidden>
             <dl class="room-detail-fields">
-              <dt>多视图 Top-1</dt><dd id="room-detail-type">等待识别</dd>
+              <dt id="room-type-source-label">多视图 Top-1</dt><dd id="room-detail-type">等待识别</dd>
               <dt>语义状态</dt><dd id="room-detail-semantic">—</dd>
               <dt>类别分数</dt><dd id="room-detail-confidence">—</dd>
               <dt>拓扑状态</dt><dd id="room-detail-topology">—</dd>
@@ -155,7 +156,7 @@
               <dt>进入记录</dt><dd id="room-detail-visits">—</dd>
               <dt>首次 / 最近观测</dt><dd id="room-detail-time">—</dd>
               <dt>入口位置</dt><dd id="room-detail-entry">—</dd>
-              <dt>候选显示锚点</dt><dd id="room-detail-anchor">—</dd>
+              <dt id="room-center-source-label">候选显示锚点</dt><dd id="room-detail-anchor">—</dd>
               <dt>连接房间</dt><dd id="room-detail-connected">—</dd>
             </dl>
             <div id="room-detail-portal" class="room-detail-portal" hidden>

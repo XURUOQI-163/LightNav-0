@@ -6,7 +6,7 @@ def test_semantic_backend_cli_selection(tmp_path):
     scene = tmp_path / "test.glb"
     scene.touch()
     assert parse_args(["--scene", str(scene)]).room_semantic_backend is None
-    for backend in ("clip", "places365"):
+    for backend in ("clip", "groundingdino", "places365"):
         args = parse_args(["--scene", str(scene), "--room-semantic-backend", backend])
         assert args.room_semantic_backend == backend
 

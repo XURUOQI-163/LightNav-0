@@ -49,7 +49,7 @@ async def execute_incrementally(r, tracker, waypoints, capture_pose):
         frame = await r._sim_call(r.scene.step, 0., 0., tracker.dt)
         r._publish(frame, preserve_view=True)
         r.state['step'] += 1
-        tracker.previous = (0., 0.)
+        tracker.previous = tuple(frame.get('applied_command', (0., 0.)))
 
     async def recover_once(reason):
         nonlocal recovery_attempted, last_progress, progress_pose
@@ -142,7 +142,7 @@ async def execute_incrementally(r, tracker, waypoints, capture_pose):
             continue
         tracking['command'] = [linear, angular]
         frame = await r._sim_call(r.scene.step, linear, angular, tracker.dt)
-        tracker.previous = (linear, angular)
+        tracker.previous = tuple(frame.get("applied_command", (linear, angular)))
         r._publish(frame, preserve_view=True)
         r.state['step'] += 1
         moved = True

@@ -56,16 +56,7 @@
     "profile_widening_ratio": 1.15
   },
   "semantic": {
-    "backend": "places365",
-    "repo_path": "/data/disk1/xrq/projects/places365",
-    "python_executable": "/data/disk1/xrq/.conda/envs/places365/bin/python",
-    "mode": "subprocess",
-    "device": "cpu",
-    "num_threads": 2,
-    "timeout": 60.0,
-    "mapping_path": null,
-    "live_enabled": true,
-    "live_interval": 1.0
+    "backend": "clip"
   },
   "regions": {
     "enabled": true,
@@ -78,6 +69,10 @@
     "sample_rows": 64,
     "height_min": 0.1,
     "height_max": 2.4,
+    "far_support_enabled": true,
+    "far_support_min_height": 0.6,
+    "far_support_min_samples": 3,
+    "far_support_depth_tolerance": 0.1,
     "wall_min_span": 0.65,
     "wall_min_top": 1.2,
     "wall_bin_size": 0.12,
@@ -139,9 +134,73 @@
     "enabled": true,
     "interval": 1.5,
     "max_weight": 20.0,
-    "filter_low_confidence": true,
-    "low_top1_threshold": 0.35,
-    "top3_spread_threshold": 0.1,
-    "view_mode": "full"
+    "backends": {
+      "clip": {
+        "view_mode": "full",
+        "filter_low_confidence": true,
+        "low_top1_threshold": 0.35,
+        "top3_spread_threshold": 0.1
+      },
+      "groundingdino": {
+        "view_mode": "detections",
+        "filter_low_confidence": false
+      }
+    }
+  },
+  "semantic_backends": {
+    "clip": {
+      "model_path": "/data/disk1/xrq/.cache/clip/ViT-B-32.pt",
+      "python_executable": "/data/disk1/xrq/.conda/envs/omnivla/bin/python",
+      "device": "cpu",
+      "num_threads": 2,
+      "timeout": 60.0,
+      "live_enabled": true,
+      "live_interval": 1.0,
+      "labels": [
+        "bedroom",
+        "living room",
+        "bathroom",
+        "kitchen",
+        "dining room",
+        "office room",
+        "gym",
+        "corridor"
+      ],
+      "templates": [
+        "a photo of a {}.",
+        "a photo of the interior of a {}.",
+        "an indoor scene of a {}."
+      ]
+    },
+    "groundingdino": {
+      "python_executable": "/data/disk1/xrq/.conda/envs/groundingdino/bin/python",
+      "device": "cuda:0",
+      "num_threads": 2,
+      "box_threshold": 0.25,
+      "timeout": 120.0,
+      "live_enabled": true,
+      "live_interval": 1.5
+    }
+  },
+  "partition": {
+    "enabled": true,
+    "peak_neighborhood_m": 0.4,
+    "opening_max_width_m": 1.6,
+    "opening_ratio": 0.75,
+    "cleanup_enabled": true,
+    "smooth_radius_m": 0.1,
+    "fill_max_area_m2": 0.09,
+    "fill_max_extent_m": 0.35,
+    "speck_max_area_m2": 0.04,
+    "speck_max_extent_m": 0.25,
+    "internal_hole_max_area_m2": 2.0,
+    "internal_hole_max_extent_m": 4.0,
+    "suppress_thin_regions": true,
+    "thin_max_width_m": 0.45,
+    "thin_min_aspect": 3.0,
+    "opening_min_width_m": 0.45,
+    "fill_internal_wall_islands": true,
+    "wall_island_max_area_m2": 0.1,
+    "wall_island_max_extent_m": 0.6
   }
 }

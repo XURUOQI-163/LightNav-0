@@ -21,6 +21,7 @@
     partial: "部分观测", observing: "观测中", observed: "已记录观测",
     unobserved: "尚未观测", entered: "已进入", exited: "已离开",
   };
+  const originalMapNote = element("room-map-note").textContent;
   let snapshot = null;
   let selectedId = null;
   let selectedPortalId = null;
@@ -36,21 +37,24 @@
   const hasLabel = (value) => value && value !== "unknown";
   const roomType = (value) => hasLabel(value) ? String(value) : "等待识别";
   const scoreText = (value) => Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : "—";
-  const providerName = (value) => ({ places365: "Places365", clip: "CLIP", qwen: "Qwen" })[value] || "场景识别";
+  const providerName = (value) => ({ places365: "Places365", clip: "CLIP", groundingdino: "Grounding DINO-T", qwen: "Qwen" })[value] || "场景识别";
   const semantic = (value) => semanticLabels[value] || value || "尚未识别";
   const poseText = (value) => hasXY(value) ? `(${value.x.toFixed(2)}, ${value.y.toFixed(2)}) m` : "—";
   const timeText = (value) => Number.isFinite(value) ? `${value.toFixed(1)} s` : "—";
   // A promoted room keeps its ID; a formal record wins if an update includes both.
-  const allRooms = () => [...new Map([
+  const partitionActive = () => snapshot?.room_partition?.enabled && items(snapshot.room_partition.rooms).length > 0;
+  const allPortals = () => items(partitionActive() ? snapshot.room_partition.portals : snapshot?.portals);
+  const currentRoomId = () => partitionActive() ? snapshot.room_partition.current_room_id : snapshot?.current_room_id;
+  const allRooms = () => partitionActive() ? items(snapshot.room_partition.rooms) : [...new Map([
     ...items(snapshot?.prospective_rooms), ...items(snapshot?.rooms),
   ].map((room) => [room.room_id, room])).values()];
   const prospective = (room) => room.topological_status === "prospective"
-    || (!items(snapshot?.rooms).some((item) => item.room_id === room.room_id)
+    || (!partitionActive() && !items(snapshot?.rooms).some((item) => item.room_id === room.room_id)
       && items(snapshot?.prospective_rooms).some((item) => item.room_id === room.room_id));
   const typeLabel = (room) => `${roomType(room.room_type)}${prospective(room) ? "?" : ""}`;
   const explored = (portal) => portal.status === "explored"
     || (portal.status !== "unexplored" && portal.traversal_count > 0);
-  const portalState = (portal) => explored(portal) ? "已穿越" : "未进入";
+  const portalState = (portal) => portal.source === "geometry_partition" ? "几何候选开口" : explored(portal) ? "已穿越" : "未进入";
   const regionPolygons = (room) => items(room.region_polygons).filter((p) =>
     items(p.outer).length >= 3 && p.outer.every(hasXY));
   const roomColor = (id) => {
@@ -72,15 +76,15 @@
       element("room-live-error").hidden = true;
       return;
     }
-    const statuses = { waiting: "等待图像", processing: live.completed_count ? "识别中" : "识别中（首次含模型加载）", ready: "已更新", error: "识别失败" };
+    const statuses = { waiting: "等待图像", processing: live.completed_count ? "识别中" : "识别中（首次含模型加载）", ready: "已更新", no_detections: "未检测到候选房间", error: "识别失败" };
     const duration = Number.isFinite(live.processing_seconds) ? ` · ${live.processing_seconds.toFixed(1)} s` : "";
     text("room-live-status", `${statuses[live.status] || live.status}${live.status === "processing" ? duration : ""}`);
     const prefix = live.status === "ready" ? "Top-1" : "上次结果";
     text("room-live-result", hasLabel(live.room_type)
-      ? `${prefix}：${live.room_type} · ${scoreText(live.confidence)}` : "等待识别结果");
+      ? `${prefix}：${live.room_type} · ${scoreText(live.confidence)}` : live.status === "no_detections" ? "当前图像无达标候选框，不新增语义颜色" : "等待识别结果");
     const latency = Number.isFinite(live.latency_ms) ? `${Math.round(live.latency_ms)} ms` : "—";
-    const age = Number.isFinite(live.age_seconds) ? `${live.age_seconds.toFixed(1)} s 前采集` : "等待采集";
-    text("room-live-meta", `源图像 ${timeText(live.source_timestamp)} · ${age} · 识别耗时 ${latency} · 已完成 ${live.completed_count ?? 0} 次`);
+    const age = Number.isFinite(live.age_seconds) ? `${live.age_seconds.toFixed(1)} s 前${next.semantic_backend === "groundingdino" ? "完成检测" : "采集"}` : "等待采集";
+    text("room-live-meta", `源图像 ${timeText(live.source_timestamp)} · ${age} · 识别耗时 ${latency} · 已完成 ${live.completed_count ?? 0} 次${next.semantic_backend === "groundingdino" ? " · 候选框 " + (live.detections?.length || 0) + "；分数为文本匹配分数，非正确率" : ""}`);
     element("room-live-error").hidden = !live.error;
     text("room-live-error", live.error || "");
   }
@@ -117,14 +121,14 @@
     const room = allRooms().find((item) => item.room_id === selectedId);
     detail.hidden = !room;
     element("room-detail-empty").hidden = Boolean(room);
-    text("room-detail-title", room ? `节点 ${room.room_id}${room.room_id === "R0" ? " · 起始空间" : prospective(room) ? " · 候选空间" : ""}` : "房间详情");
+    text("room-detail-title", room ? `节点 ${room.room_id}${room.room_id === "R0" && !partitionActive() ? " · 起始空间" : prospective(room) ? " · 候选空间" : ""}` : "房间详情");
     if (!room) { clearFrame(); return; }
     text("room-detail-type", typeLabel(room));
     text("room-detail-semantic", room.semantic_status === "ready" && room.room_type === "unknown"
       ? snapshot.semantic_backend === "places365"
         ? "旧版分类结果；请重启 Habitat 开始新记录" : "分类已完成，暂无明确类别"
       : semantic(room.semantic_status || snapshot.semantic_status));
-    text("room-detail-topology", prospective(room) ? "候选空间，尚未进入；位置仅为显示锚点" : room.topological_status === "provisional"
+    text("room-detail-topology", room.source === "geometry_partition" ? `几何分割候选 · 中心 ${poseText(room.centroid)} · 语义格子 ${room.semantic_cells || 0}` : prospective(room) ? "候选空间，尚未进入；位置仅为显示锚点" : room.topological_status === "provisional"
       ? "暂定空间，尚未确认门户穿越" : room.topological_status === "crossing_confirmed"
         ? "已记录门户穿越" : "—");
     text("room-detail-confidence", hasLabel(room.room_type) ? scoreText(room.semantic_confidence) : "—");
@@ -136,9 +140,9 @@
     text("room-detail-visits", `${entered ? "已进入" : "未进入"} · 进入 ${room.visit_count ?? (entered ? 1 : 0)} 次`);
     text("room-detail-time", `${timeText(room.first_seen_time)} / ${timeText(room.last_seen_time)}`);
     text("room-detail-entry", poseText(room.entry_pose));
-    text("room-detail-anchor", prospective(room) ? poseText(room.candidate_pose) : "—");
+    text("room-detail-anchor", hasXY(room.centroid) ? poseText(room.centroid) : prospective(room) ? poseText(room.candidate_pose) : "—");
     text("room-detail-connected", items(room.connected_room_ids).join("、") || "尚无已记录连接");
-    const linkedPortals = items(snapshot.portals).filter((item) => item.room_a === room.room_id || item.room_b === room.room_id);
+    const linkedPortals = allPortals().filter((item) => item.room_a === room.room_id || item.room_b === room.room_id);
     const portal = linkedPortals.find((item) => item.portal_id === selectedPortalId) || linkedPortals[0];
     element("room-detail-portal").hidden = !portal;
     if (portal) {
@@ -174,6 +178,7 @@
     const anchors = new Map();
     const rooms = allRooms();
     for (const room of rooms) {
+      if (hasXY(room.centroid)) { anchors.set(room.room_id, room.centroid); continue; }
       if (prospective(room)) {
         if (hasXY(room.candidate_pose)) anchors.set(room.room_id, room.candidate_pose);
       } else if (hasXY(room.entry_pose)) anchors.set(room.room_id, room.entry_pose);
@@ -186,10 +191,11 @@
         });
       }
     }
-    const portals = items(snapshot.portals).filter(hasXY);
+    const portals = allPortals().filter(hasXY);
     const allPoints = [...trajectory, ...anchors.values(), ...portals];
     const showRegions = element("room-regions-toggle").checked;
     const semanticMap = snapshot.semantic_map;
+    text("room-semantic-provider", `${providerName(snapshot.semantic_backend)} 语义投影`);
     const showSemantics = !!semanticMap?.enabled && element("room-semantic-toggle").checked;
     const legend = element("room-semantic-legend");
     legend.replaceChildren();
@@ -200,11 +206,11 @@
       entry.append(swatch, document.createTextNode(label));
       legend.append(entry);
     });
-    const statuses = {waiting: "等待同步 RGB-D", processing: "正在分类图像", ready: "已融合",
+    const statuses = {waiting: "等待同步 RGB-D", processing: "正在检测图像", no_detections: "当前图像无达标候选框", ready: "已融合",
       filtered: "当前视图因低分或类别接近，已跳过", error: "投影失败", no_visible_depth: "当前帧无可投影深度", geometry_disabled: "需启用二维几何地图"};
     text("room-semantic-status", semanticMap?.enabled
-      ? `语义投影（${semanticMap.view_mode === 'full' ? '整图' : semanticMap.view_mode === 'left_right' ? '左右子图' : '视图'}）：${statuses[semanticMap.status] || semanticMap.status} · 有证据格子 ${semanticMap.evidence_cells || 0} · 最近过滤帧 ${timeText(semanticMap.filter_timestamp)} · 采纳 ${semanticMap.accepted_views || 0} / 过滤 ${semanticMap.rejected_views || 0} · 已融合源帧 ${timeText(semanticMap.source_timestamp)}${semanticMap.error ? " · " + semanticMap.error : ""}`
-      : "语义投影未启用（需要 CLIP 与二维几何地图）");
+      ? `语义投影（${semanticMap.view_mode === 'full' ? '整图' : semanticMap.view_mode === 'detections' ? '检测框方向' : semanticMap.view_mode === 'left_right' ? '左右子图' : '视图'}）：${statuses[semanticMap.status] || semanticMap.status} · 有证据格子 ${semanticMap.evidence_cells || 0} · 最近过滤帧 ${timeText(semanticMap.filter_timestamp)} · 采纳 ${semanticMap.accepted_views || 0} / 过滤 ${semanticMap.rejected_views || 0} · 已融合源帧 ${timeText(semanticMap.source_timestamp)}${semanticMap.error ? " · " + semanticMap.error : ""}`
+      : "语义投影未启用（需要 CLIP 或 Grounding DINO 与二维几何地图）");
     const bounds = semanticMap?.bounds;
     if (showSemantics && Array.isArray(bounds) && bounds.length === 4 && bounds.every(Number.isFinite)) {
       allPoints.push({x: bounds[0], y: bounds[1]}, {x: bounds[2], y: bounds[3]});
@@ -213,7 +219,7 @@
     if (showRegions) for (const room of rooms) for (const polygon of regionPolygons(room)) allPoints.push(...polygon.outer);
     if (hasXY(snapshot.current_pose)) allPoints.push(snapshot.current_pose);
     if (hasXY(snapshot.start_pose)) allPoints.push(snapshot.start_pose);
-    if (hasXY(snapshot.candidate)) allPoints.push(snapshot.candidate);
+    if (!partitionActive() && hasXY(snapshot.candidate)) allPoints.push(snapshot.candidate);
     const width = Math.max(280, svg.clientWidth);
     const height = Math.max(280, svg.clientHeight);
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
@@ -260,7 +266,26 @@
       const layer = shape("image", {href: semanticMap.image, x: topLeft.x, y: topLeft.y,
         width: (bounds[2] - bounds[0]) * scale, height: (bounds[3] - bounds[1]) * scale,
         preserveAspectRatio: "none", class: "room-semantic-raster", "pointer-events": "none"});
+      if (partitionActive()) {
+        // Display semantics only inside the cleaned region layer; retain raw
+        // historical evidence in the backend for subsequent observations.
+        const clip = shape("clipPath", {id: "room-partition-clip", clipPathUnits: "userSpaceOnUse"});
+        for (const room of rooms) for (const polygon of regionPolygons(room)) {
+          const rings = [polygon.outer, ...items(polygon.holes)];
+          clip.append(shape("path", {d: rings.map((ring) => `M${ring.map(position).join(" L")} Z`).join(" "), "clip-rule": "evenodd"}));
+        }
+        const defs = shape("defs"); defs.append(clip); svg.append(defs);
+        layer.setAttribute("clip-path", "url(#room-partition-clip)");
+      }
       svg.append(layer);
+    }
+    if (partitionActive() && showRegions) for (const room of rooms) {
+      for (const polygon of regionPolygons(room)) {
+        const rings = [polygon.outer, ...items(polygon.holes)];
+        svg.append(shape("path", {d: rings.map((ring) => `M${ring.map(position).join(" L")} Z`).join(" "),
+          fill: "none", stroke: "#f8fafc", "stroke-width": 1.5, "stroke-opacity": .8,
+          "pointer-events": "none", "data-partition-boundary": room.room_id}));
+      }
     }
     if (trajectory.length) svg.append(shape("polyline", { points: trajectory.map(position).join(" "), class: "room-trajectory" }));
     for (const portal of portals) {
@@ -284,7 +309,7 @@
       node.append(shape("line", { ...endpoints, class: "room-portal-hit" }));
       node.append(shape("line", { ...endpoints, class: "room-portal-marker" }));
       node.append(shape("circle", { cx: p.x, cy: p.y, r: 4, class: "room-portal-center" }));
-      node.append(shape("text", { x: p.x + 9, y: p.y - 10, class: "room-portal-label" }, `${portal.portal_id} · ${portalState(portal)}`));
+      node.append(shape("text", { x: p.x + 9, y: p.y - 10, class: "room-portal-label" }, String(portal.portal_id)));
       node.append(shape("title", {}, `${portal.portal_id} · ${portalState(portal)} · 穿越 ${portal.traversal_count ?? 0} 次`));
       selectable(node, () => {
         const linked = [portal.room_b, portal.room_a].map((id) => rooms.find((room) => room.room_id === id)).filter(Boolean);
@@ -293,7 +318,7 @@
       });
       svg.append(node);
     }
-    if (hasXY(snapshot.candidate)) {
+    if (!partitionActive() && hasXY(snapshot.candidate)) {
       const p = project(snapshot.candidate);
       const candidate = shape("circle", { cx: p.x, cy: p.y, r: 9, class: "room-portal-candidate" });
       candidate.append(shape("title", {}, "待确认的门口候选"));
@@ -303,7 +328,7 @@
       if (!anchors.has(room.room_id)) continue;
       const p = project(anchors.get(room.room_id));
       const selected = room.room_id === selectedId;
-      const current = room.room_id === snapshot.current_room_id;
+      const current = room.room_id === currentRoomId();
       const node = shape("g", {
         id: `room-map-node-${encodeURIComponent(room.room_id)}`, "data-room-id": room.room_id,
         class: `room-node ${prospective(room) ? "is-prospective" : room.visited ? "is-entered" : "is-unvisited"}${current ? " is-current" : ""}${selected ? " is-selected" : ""}`,
@@ -321,7 +346,7 @@
         const q = project(portal);
         return Math.hypot(q.x - p.x, q.y - p.y) < 90;
       });
-      if (nearbyPortal) {
+      if (nearbyPortal && !hasXY(room.centroid)) {
         // Keep nearby room text clear of the measured doorway segment and label.
         const q = project(nearbyPortal);
         const extent = Math.abs(Math.cos(nearbyPortal.normal_yaw || 0)) * (nearbyPortal.width || 0) * scale / 2;
@@ -329,6 +354,7 @@
         labelAttrs.x = Math.min(width - 75, Math.max(75, p.x));
         labelAttrs["text-anchor"] = "middle";
       }
+      if (hasXY(room.centroid)) { labelAttrs.x = p.x; labelAttrs["text-anchor"] = "middle"; labelY = p.y - 18; }
       node.append(shape("text", { ...labelAttrs, y: labelY }, String(room.room_id)));
       const label = typeLabel(room);
       const typeNode = shape("text", { ...labelAttrs, y: labelY + 16, class: "room-node-type" }, label);
@@ -359,6 +385,14 @@
   function render(next) {
     if (!next || typeof next.enabled !== "boolean") throw new Error("房间记忆响应格式无效");
     snapshot = next;
+    text("room-map-note", partitionActive()
+      ? "白色边界是长期几何范围的候选分割，不是语义颜色分界；颜色仍表示各格子的融合类别。Rn 位于区域几何质心，类型由区域内有证据格子汇总；细长空间保留。蓝色几何开口尚未经过门检测确认。范围不完整时可能多分、合并或拆分；类型后的 ? 表示尚未进入的候选区域，不表示分类低分。空白仍是未观测区域。"
+      : originalMapNote);
+    text("room-identity-note", partitionActive()
+      ? "Rn 是几何区域编号；按空间重叠继承，合并或拆分时记录编号关系。"
+      : "R0、R1 是空间节点编号；候选空间进入后沿用原编号。");
+    text("room-type-source-label", partitionActive() ? "区域语义汇总 Top-1" : "多视图 Top-1");
+    text("room-center-source-label", partitionActive() ? "几何质心" : "候选显示锚点");
     renderLive(next);
     panel.hidden = !next.enabled;
     if (!next.enabled) { selectedId = null; selectedPortalId = null; clearFrame(); return; }
@@ -370,20 +404,20 @@
     }
     const rooms = allRooms();
     if (!rooms.some((room) => room.room_id === selectedId)) {
-      selectedId = rooms.some((room) => room.room_id === next.current_room_id)
-        ? next.current_room_id : rooms[0]?.room_id ?? null;
+      selectedId = rooms.some((room) => room.room_id === currentRoomId())
+        ? currentRoomId() : rooms[0]?.room_id ?? null;
     }
-    if (!items(next.portals).some((portal) => portal.portal_id === selectedPortalId)) selectedPortalId = null;
+    if (!allPortals().some((portal) => portal.portal_id === selectedPortalId)) selectedPortalId = null;
     const labels = { recording: "记录中", ready: "记录中", idle: "等待观测", error: "模块异常", starting: "初始化中" };
     const dropped = next.dropped_frames ? ` · 跳过 ${next.dropped_frames} 帧` : "";
     const provider = `${providerName(next.semantic_backend)} · `;
     const enteredCount = rooms.filter((room) => !prospective(room) && room.visited).length;
     const prospectiveCount = rooms.filter(prospective).length;
-    text("room-memory-status", `${labels[next.status] || next.status || "等待观测"} · 已进入空间 ${enteredCount} / 候选空间 ${prospectiveCount} / 门口 ${items(next.portals).length} · ${provider}${semantic(next.semantic_status)}${dropped}`);
+    text("room-memory-status", `${labels[next.status] || next.status || "等待观测"}${partitionActive() ? " · 几何房间分割" : ""} · 已进入空间 ${enteredCount} / 候选空间 ${prospectiveCount} / 门口 ${allPortals().length} · ${provider}${semantic(next.semantic_status)}${dropped}`);
     const error = element("room-memory-error");
     const structuralWarning = next.structure?.status === "floor_mismatch" ? "高度变化超出本层范围，已暂停区域更新；请使用同层场景或重置。"
       : next.structure?.status === "capacity_reached" ? "区域地图已达到配置范围，边界外观测未保存。" : "";
-    const messages = [next.error ? `房间记忆：${next.error}` : "", next.doorway_error ? `门口检测：${next.doorway_error}` : "",
+    const messages = [next.room_partition?.error ? `几何分割：${next.room_partition.error}` : "", next.error ? `房间记忆：${next.error}` : "", next.doorway_error ? `门口检测：${next.doorway_error}` : "",
       next.structure?.error ? `房间范围：${next.structure.error}` : "", structuralWarning].filter(Boolean);
     error.hidden = !messages.length;
     error.textContent = messages.join("；");

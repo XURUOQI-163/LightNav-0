@@ -1,0 +1,16 @@
+{
+  "semantic": {
+    "backend": "groundingdino",
+    "python_executable": "/data/disk1/xrq/.conda/envs/groundingdino/bin/python",
+    "device": "cuda:0",
+    "num_threads": 2,
+    "box_threshold": 0.25,
+    "timeout": 120.0,
+    "live_enabled": true,
+    "live_interval": 1.5
+  },
+  "semantic_projection": {
+    "view_mode": "detections",
+    "filter_low_confidence": false
+  }
+}

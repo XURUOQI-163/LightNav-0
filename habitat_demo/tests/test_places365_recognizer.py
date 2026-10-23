@@ -37,7 +37,8 @@ def test_default_provider_is_local_places_without_api_key(monkeypatch):
     assert config["device"] == "cpu"
     assert config["mode"] == "subprocess"
     _, _, shipped = load_config(Path(__file__).parents[1] / "room_memory/config/default.json")
-    assert config == shipped
+    assert shipped["backend"] == "clip"
+    assert shipped["python_executable"].endswith("/omnivla/bin/python")
 
 
 def test_fusion_averages_raw_classes_without_mapping_or_thresholds():

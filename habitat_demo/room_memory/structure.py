@@ -1,6 +1,6 @@
 """Bounded, single-level structural evidence from ephemeral RGB-D projections.
 
-Coverage means a horizontal location has been seen at some height, NOT that a
+Coverage requires continuous vertical visibility support, NOT that a
 robot can drive there. Only repeated tall-surface evidence is retained as walls;
 there is no persistent furniture occupancy or raw cloud. Tall cabinets remain a
 known ambiguity without a wall segmentation model.
@@ -25,6 +25,10 @@ class RegionConfig:
     sample_rows: int = 64
     height_min: float = 0.10
     height_max: float = 2.4
+    far_support_enabled: bool = True
+    far_support_min_height: float = 0.60
+    far_support_min_samples: int = 3
+    far_support_depth_tolerance: float = 0.10
     wall_min_span: float = 0.65
     wall_min_top: float = 1.2
     wall_bin_size: float = 0.12
@@ -37,10 +41,11 @@ class RegionConfig:
     min_region_area: float = 0.02
 
     def __post_init__(self):
-        if not isinstance(self.enabled, bool):
-            raise ValueError("regions.enabled must be boolean")
+        for k in ("enabled", "far_support_enabled"):
+            if not isinstance(getattr(self, k), bool):
+                raise ValueError("regions." + k + " must be boolean")
         for k, v in asdict(self).items():
-            if k == "enabled":
+            if k in ("enabled", "far_support_enabled"):
                 continue
             if (
                 isinstance(v, bool)
@@ -49,7 +54,7 @@ class RegionConfig:
                 or v <= 0
             ):
                 raise ValueError("invalid region configuration: " + k)
-        for k in ("grid_size", "sample_columns", "sample_rows", "wall_confirm_frames"):
+        for k in ("grid_size", "sample_columns", "sample_rows", "wall_confirm_frames", "far_support_min_samples"):
             if type(getattr(self, k)) is not int:
                 raise ValueError("regions integer required: " + k)
         if not (32 <= self.grid_size <= 2048 and 0.02 <= self.cell_size <= 0.5):
@@ -58,6 +63,12 @@ class RegionConfig:
             raise ValueError("region sampling exceeds bounded limits")
         if not (self.depth_min < self.depth_max <= 20 and self.height_min < self.height_max):
             raise ValueError("invalid region depth/height bounds")
+        if not (
+            2 <= self.far_support_min_samples <= self.sample_rows
+            and self.far_support_min_height <= self.height_max - self.height_min
+            and self.far_support_depth_tolerance <= 0.5
+        ):
+            raise ValueError("invalid region vertical support bounds")
         if self.wall_confirm_frames < 2 or self.wall_confirm_frames > 255:
             raise ValueError("wall_confirm_frames must be 2..255")
         if (
@@ -174,7 +185,7 @@ class StructuralMapBuilder:
         return True
 
     def project_columns(self, frame):
-        """Pure per-frame farthest rays shared by structure and semantic projection.
+        """Pure per-frame supported farthest rays shared by structure and semantics.
 
         Uses structural depth/height validity and the identical row/column samples.
         Does not update coverage, timestamps, walls, or room ownership.
@@ -198,13 +209,44 @@ class StructuralMapBuilder:
         translation = np.array([frame.pose.x, frame.pose.y])
         origin_xy = transform[:2, 3] @ rotation.T + translation
         xy = points[..., :2] @ rotation.T + translation
-        # Farthest actually measured ray per image column covers horizontal
-        # membership above low furniture. It never clears beyond that ray's hit.
+        # Retain the farthest measured hit supported by a continuous vertical
+        # opening. A single shelf slit must not extend the whole room footprint.
         ranges = np.linalg.norm(xy - origin_xy, axis=-1)
-        choices = np.argmax(np.where(valid, ranges, -1), axis=0)
+        supported = self._vertical_support(points, ranges, valid, transform[2, 3])
+        choices = np.argmax(np.where(supported, ranges, -1), axis=0)
         endpoints = xy[choices, np.arange(len(cols))]
-        good = valid.any(axis=0)
+        good = supported.any(axis=0)
         return cols, points, valid, rotation, translation, origin_xy, endpoints, good
+
+    def _vertical_support(self, points, ranges, valid, camera_height):
+        """Test each candidate radius against consecutive rows in its column.
+
+        Heights are evaluated where rays cross the candidate radius, NOT at
+        different-depth endpoints (which would exaggerate slit height). A ray
+        must reach that radius; nearer furniture and invalid rows break the run.
+        Different surfaces may support one opening, so no flat back wall is
+        required. Temporary arrays are at most sample_rows x sample_columns.
+        """
+        c = self.config
+        if not c.far_support_enabled:
+            return valid
+        supported = np.zeros_like(valid)
+        count = np.zeros_like(ranges, dtype=np.int16)
+        low = np.full_like(ranges, np.inf)
+        high = np.full_like(ranges, -np.inf)
+        # Vectorize all candidate radii/columns; only the scan over rows is Python.
+        for row in range(len(ranges)):
+            reaches = valid[row] & (ranges[row] + c.far_support_depth_tolerance >= ranges)
+            slope = (points[row, :, 2] - camera_height) / np.maximum(ranges[row], 1e-8)
+            height = camera_height + ranges * slope
+            reaches &= (height >= c.height_min) & (height <= c.height_max)
+            count = np.where(reaches, count + 1, 0)
+            low = np.where(reaches, np.minimum(low, height), np.inf)
+            high = np.where(reaches, np.maximum(high, height), -np.inf)
+            supported |= (count >= c.far_support_min_samples) & (
+                high - low >= c.far_support_min_height - 1e-8
+            )
+        return valid & supported
 
     def _walls(self, points, rotation, translation):
         c = self.config

@@ -31,7 +31,11 @@ class RoomMemoryService:
         doorway_detector=None,
         region_config=None,
         projection_config=None,
+        partition_config=None,
     ):
+        from .partition import PartitionConfig
+
+        self.partition_config = partition_config if isinstance(partition_config, PartitionConfig) else PartitionConfig(**(partition_config or {}))
         self.config = memory_config
         DepthPortalDetector(geometry_config)  # Validate before starting workers/EGL.
         self.geometry_config = geometry_config
@@ -49,7 +53,7 @@ class RoomMemoryService:
         options = dict(semantic_config)
         self.semantic_backend = options.pop("backend", "places365")
         live_enabled = options.pop(
-            "live_enabled", self.semantic_backend in ("places365", "clip") and classifier is None
+            "live_enabled", self.semantic_backend in ("places365", "clip", "groundingdino") and classifier is None
         )
         live_interval = options.pop("live_interval", 1.0)
         if classifier is not None:
@@ -64,12 +68,17 @@ class RoomMemoryService:
 
             self.classifier = CLIPRecognizer(**options)
             self.semantic_enabled = True
+        elif self.semantic_backend == "groundingdino":
+            from .groundingdino_recognizer import GroundingDINORecognizer
+
+            self.classifier = GroundingDINORecognizer(**options)
+            self.semantic_enabled = True
         elif self.semantic_backend == "qwen":
             self.classifier = QwenRoomSemanticClassifier(**options)
             self.semantic_enabled = bool(os.environ.get("DASHSCOPE_API_KEY"))
         else:
             raise ValueError("unknown room semantic backend")
-        self.live = LiveSceneRecognition(self.classifier, live_enabled, live_interval)
+        self.live = LiveSceneRecognition(self.classifier, live_enabled and self.semantic_backend != "groundingdino", live_interval)
         describe = getattr(self.classifier, "metadata", None)
         self.semantic_metadata = describe() if describe else dict(backend=self.semantic_backend)
         from .projection_worker import SemanticProjectionWorker
@@ -117,7 +126,9 @@ class RoomMemoryService:
     @property
     def cache(self):
         # Recompute age even when navigation is paused and geometry is unchanged.
-        return dict(self._cache, live_semantic=self.live.snapshot(), semantic_map=dict(self.projection.state))
+        return dict(self._cache, live_semantic=(self.projection.live_snapshot()
+            if self.semantic_backend == "groundingdino" else self.live.snapshot()),
+            semantic_map=dict(self.projection.state))
 
     async def start(self):
         self.queue = asyncio.Queue(maxsize=self.config.queue_size)
@@ -212,10 +223,25 @@ class RoomMemoryService:
             else observation.get("floor_elevation"),
         )
 
+    def _partition_snapshot(self, manager, evidence_map):
+        from .partition import GeometricRoomPartition
+
+        if not hasattr(manager, 'room_partition'):
+            manager.room_partition = GeometricRoomPartition(self.partition_config)
+        partition = manager.room_partition
+        try:
+            return partition.update(manager.structure, evidence_map, manager.current_pose,
+                                    manager.trajectory, manager.output_dir)
+        except Exception as exc:
+            # A passive observer failure never stops navigation or rewrites room IDs.
+            return dict(partition.state, status='error', error=f'{type(exc).__name__}: {str(exc)[:180]}')
+
     async def _refresh(self):
         manager, generation = self.manager, self.generation
-        snapshot = await self._call(manager.snapshot)
         evidence_map = self.projection.map
+        partition = await self._call(self._partition_snapshot, manager, evidence_map)
+        snapshot = await self._call(manager.snapshot)
+        snapshot["room_partition"] = partition
         if evidence_map is not None:
             raster = await self._call(evidence_map.snapshot)
             if generation == self.generation:

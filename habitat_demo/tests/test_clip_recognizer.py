@@ -23,7 +23,7 @@ def jpeg():
 
 def test_clip_selection_preserves_places_defaults_and_uses_own_environment():
     path = Path(__file__).parents[1] / "room_memory/config/default.json"
-    _, _, places = load_config(path)
+    _, _, places = load_config(path, semantic_backend="places365")
     _, _, clip = load_config(path, semantic_backend="clip")
     assert places["backend"] == "places365"
     assert clip["backend"] == "clip"
@@ -175,7 +175,7 @@ async def test_compare_runs_both_models_on_identical_images(tmp_path):
     compare = importlib.import_module("room_memory.compare_semantics")
     path = tmp_path / "frame.jpg"
     path.write_bytes(jpeg())
-    report = await compare.compare_images([path])
+    report = await compare.compare_images([path], backends=("clip", "places365"))
     assert set(report["results"]) == {"clip", "places365"}
     assert len(report["images"][0]["sha256"]) == 64
     for backend, result in report["results"].items():

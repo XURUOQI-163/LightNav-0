@@ -56,6 +56,8 @@ def test_intermediate_frames_preserve_step_count_and_zero_wheels_on_failure():
     from isaac_web.scene import CarterScene
     scene = CarterScene.__new__(CarterScene)
     scene.cfg = {"physics_dt": 1/60, "display_fps": 15}
+    from isaac_web.stability import DriveLimiter
+    scene.drive_limiter = DriveLimiter({})
     scene.sim_time = 0.
     scene.cached = None
     count = []
@@ -74,7 +76,9 @@ def test_intermediate_frames_preserve_step_count_and_zero_wheels_on_failure():
     assert [n for n, _ in frames] == [4, 8, 12, 16]
     assert [t for _, t in frames] == pytest.approx([4/60, 8/60, 12/60, 16/60])
     assert result['sim_time'] == pytest.approx(1/3)
-    assert wheels == [(.15, .2), (0., 0.)]
+    assert len(wheels) == 21 and wheels[-1] == (0., 0.)
+    assert wheels[0][0] == pytest.approx(.6/60)
+    assert wheels[-2] == pytest.approx((.15, .2))
     assert result['timing']['step_wall_ms'] >= result['timing']['render_ms'] >= 0
     scene.preview_callback = lambda frame: (_ for _ in ()).throw(RuntimeError('closed pipe'))
     with pytest.raises(RuntimeError, match='closed pipe'):

@@ -9,6 +9,8 @@ from isaac_web.scene import CarterScene
 def make_scene():
     scene = CarterScene.__new__(CarterScene)
     scene.cfg = dict(width=2, height=2, camera_ready_max_renders=3, camera_ready_timeout_s=10.)
+    from isaac_web.stability import DriveLimiter
+    scene.drive_limiter = DriveLimiter({})
     scene.sim_time = 0.
     scene.progress_callback = None
     scene.camera = SimpleNamespace(get_rgb=lambda: np.ones((2, 2, 3), dtype=np.uint8),

@@ -68,13 +68,13 @@ def test_wall_requires_vertical_extent_and_repeated_frames():
     assert not m.walls.any()
     m.observe(rgbd(t=1))
     assert cell_value(m, m.walls, 3, 0)
-    # A low cabinet visible only below 0.7 m supplies coverage, not a room wall.
+    # A low cabinet strip alone supplies neither tall visibility nor a room wall.
     low = np.full((60, 80), np.nan)
     low[27:35] = 1.0
     n = builder()
     n.observe(rgbd(low))
     n.observe(rgbd(low, 1))
-    assert n.coverage.any() and not n.walls.any()
+    assert not n.coverage.any() and not n.walls.any()
 
 
 def test_pose_rotation_calibration_and_map_bounds():
