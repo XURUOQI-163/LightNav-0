@@ -28,12 +28,12 @@
     0.6
   ],
   "stability": {
-    "max_linear": 0.35,
-    "max_angular": 0.8,
-    "linear_acceleration": 0.35,
+    "max_linear": 0.5,
+    "max_angular": 1.0,
+    "linear_acceleration": 0.5,
     "linear_deceleration": 0.5,
     "angular_acceleration": 1.0,
-    "max_lateral_acceleration": 0.25,
+    "max_lateral_acceleration": 0.5,
     "wheel_max_torque": 2.0,
     "wheel_damping": 5.0,
     "com_lowering": 0.08,

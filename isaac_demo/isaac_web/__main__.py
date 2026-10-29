@@ -63,7 +63,6 @@ def parse_args(argv=None):
     try:
         cfg = json.loads(a.config.read_text())
         cfg = apply_robot_profile(cfg, a.robot_profile)
-        stability = StabilityConfig(**cfg["stability"])
         if a.local_navigation:
             from dataclasses import asdict
 
@@ -150,12 +149,6 @@ def parse_args(argv=None):
                 raise ValueError("invalid model URL scheme or hostname")
     except (OSError, KeyError, TypeError, ValueError) as exc:
         p.error(str(exc))
-    requested = (a.max_linear, a.max_angular)
-    a.max_linear = min(a.max_linear, stability.max_linear)
-    a.max_angular = min(a.max_angular, stability.max_angular)
-    if requested != (a.max_linear, a.max_angular):
-        print(f"[isaac-web] {cfg['robot_profile']} dynamics limits: requested v/w={requested}, "
-              f"effective v/w={(a.max_linear, a.max_angular)}", flush=True)
     return a, cfg
 
 
